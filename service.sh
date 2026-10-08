@@ -1,174 +1,119 @@
 #!/system/bin/sh
-function log() {
-    echo "$(date '+%m-%d %H:%M:%S [trustusercerts]')" "$@" >> /cache/magisk.log
+
+if [ "${KSU:-}" = true ]; then
+    BUSYBOX=/data/adb/ksu/bin/busybox
+else
+    BUSYBOX=/data/adb/magisk/busybox
+fi
+[ -x "$BUSYBOX" ] || { echo "Root manager BusyBox is unavailable" >&2; exit 1; }
+if [ "${ASH_STANDALONE:-}" != 1 ]; then
+    export ASH_STANDALONE=1
+    exec "$BUSYBOX" sh "$0" "$@"
+fi
+set -e
+[ "$(id -u)" = 0 ] || { echo "Root is required" >&2; exit 1; }
+
+STATE=/data/adb/trustusercerts
+mkdir -p "$STATE/certificates"
+log() {
+    echo "$(date '+%m-%d %H:%M:%S [trustusercerts]') $*" | tee -a "$STATE/module.log"
 }
 
-function inject_into_apex() {
-    # Deal with the APEX overrides in Android 14+, which need injecting into each namespace:
-    if [ -d "/apex/com.android.conscrypt/cacerts" ]; then
-        log "Injecting certificates into APEX cacerts"
-
-        # When the APEX manages cacerts, we need to mount them at that path too. We can't do
-        # this globally as APEX mounts are namespaced per process, so we need to inject a
-        # bind mount for this directory into every mount namespace.
-
-        # First we get the Zygote process(es), which launch each app
-        ZYGOTE_PID=$(pidof zygote || true)
-        ZYGOTE64_PID=$(pidof zygote64 || true)
-        Z_PIDS="$ZYGOTE_PID $ZYGOTE64_PID"
-        # N.b. some devices appear to have both, some have >1 of each (!)
-
-        # Apps inherit the Zygote's mounts at startup, so we inject here to ensure all newly
-        # started apps will see these certs straight away:
-        for Z_PID in $Z_PIDS; do
-            if [ -n "$Z_PID" ]; then
-                nsenter --mount=/proc/$Z_PID/ns/mnt -- \
-                    /bin/mount --bind /system/etc/security/cacerts /apex/com.android.conscrypt/cacerts
-            fi
-        done
-
-        log "Zygote APEX certificates remounted"
-
-        # Then we inject the mount into all already running apps, so they see these certs immediately.
-
-        # Get the PID of every process whose parent is one of the Zygotes:
-        APP_PIDS=$(
-            echo $Z_PIDS | \
-            xargs -n1 ps -o 'PID' -P | \
-            grep -v PID
-        )
-
-        # Inject into the mount namespace of each of those apps:
-        for PID in $APP_PIDS; do
-            nsenter --mount=/proc/$PID/ns/mnt -- \
-                /bin/mount --bind /system/etc/security/cacerts /apex/com.android.conscrypt/cacerts &
-        done
-        wait # Launched in parallel - wait for completion here
-
-        log "APEX certificates remounted for $(echo $APP_PIDS | wc -w) apps"
-    fi
-}
-
-function monitor_user_certificate_folder() {
-    if [ ! -d "/data/adb/trustusercerts/certificates" ]; then
-        mkdir -p /data/adb/trustusercerts/certificates
-    fi
-    certificate_folder="/data/misc/user/0/cacerts-added"
-    if [ -f "/data/adb/trustusercerts/no_user_cert" ]; then
-        certificate_folder="/data/adb/trustusercerts/certificates"
-    fi
-    current_file_list=$(ls "$certificate_folder/")
-    file_names_variable=$(cat /data/local/tmp/trustusercerts/current_file_list.txt)
-    destination="/system/etc/security/cacerts/"
-    need_to_inject_into_apex=false
-
-    # Create temporary files for sorting
-    current_sorted=$(mktemp)
-    variable_sorted=$(mktemp)
-
-    # Sort and save the current file list
-    echo "$current_file_list" | tr ' ' '\n' | sort > "$current_sorted"
-
-    # Sort and save the variable file list
-    echo "$file_names_variable" | tr ' ' '\n' | sort > "$variable_sorted"
-
-    # Compare files and find added and deleted files
-    added_files=$(comm -13 "$variable_sorted" "$current_sorted")
-    deleted_files=$(comm -13 "$current_sorted" "$variable_sorted")
-
-    # Copy added files to the destination
-    for file in $added_files; do
-        cp "$certificate_folder/$file" "$destination"
-        # Update the perms & selinux context labels, so everything is as readable as before
-        chown root:root "$destination/$file"
-        chmod 644 "$destination/$file"
-        chcon u:object_r:system_file:s0 "$destination/$file"
-        log "Detected new certificate $file, added to $destination"
-        need_to_inject_into_apex=true
-    done
-
-    # Delete deleted files from the destination
-    for file in $deleted_files; do
-        echo "$file"
-        if [ -f "$destination/$file" ]; then
-            rm "$destination/$file"
-            log "Detected deleted certificate $file, removed from $destination"
-            need_to_inject_into_apex=true
-        fi
-    done
-    if [ "$need_to_inject_into_apex" = true ]; then
-        log "Injecting certificates into APEX cacerts"
-        inject_into_apex
-    fi
-    # Update the variable for future comparison
-    echo "$current_file_list" > /data/local/tmp/trustusercerts/current_file_list.txt
-
-    # Remove temporary files
-    rm "$current_sorted" "$variable_sorted"
-}
-
-# Wait for boot to complete
+# KernelSU also calls service.sh after late-load; no blocking late-load.sh is needed.
 while [ "$(getprop sys.boot_completed)" != 1 ]; do
-    /system/bin/sleep 1s
+    sleep 1
 done
 
-if [ ! -d "/data/adb/trustusercerts/certificates" ]; then
-    mkdir -p /data/adb/trustusercerts/certificates
+RUNTIME=/dev/trustusercerts
+mkdir -p -m 700 "$RUNTIME"
+mkdir "$RUNTIME/.lock" 2>/dev/null || { log "Another certificate update is running"; exit 1; }
+STAGE=
+STAGE_PUBLISHED=false
+cleanup() {
+    result=$?
+    trap - EXIT
+    if [ -n "$STAGE" ] && [ "$STAGE_PUBLISHED" = false ]; then
+        rm -rf "$STAGE"
+    fi
+    rmdir "$RUNTIME/.lock"
+    [ "$result" = 0 ] || log "Certificate update failed (exit $result)"
+    exit "$result"
+}
+trap cleanup EXIT
+trap 'exit 1' HUP INT TERM
+
+SYSTEM_CERTS=/system/etc/security/cacerts
+APEX_CERTS=/apex/com.android.conscrypt/cacerts
+TARGETS="$SYSTEM_CERTS"
+STOCK_SOURCE=$SYSTEM_CERTS
+if [ -d "$APEX_CERTS" ]; then
+    TARGETS="$TARGETS $APEX_CERTS"
+    STOCK_SOURCE=$APEX_CERTS
 fi
 
-# Create a temp directory for the module
-if [ -d "/data/local/tmp/trustusercerts" ]; then
-    rm -r /data/local/tmp/trustusercerts
+Z_PIDS=$(pidof zygote zygote64 || true)
+[ -n "$Z_PIDS" ] || { log "No Zygote process found"; exit 1; }
+
+# /dev is cleared on reboot: repeated actions must not keep removed user CAs.
+STOCK=$RUNTIME/stock
+mkdir -p -m 700 "$STOCK"
+if [ ! -f "$STOCK/.ready" ]; then
+    cp "$STOCK_SOURCE"/* "$STOCK/"
+    touch "$STOCK/.ready"
 fi
 
-certificate_folder="/data/misc/user/0/cacerts-added"
-if [ -f "/data/adb/trustusercerts/no_user_cert" ]; then
-    certificate_folder="/data/adb/trustusercerts/certificates"
+certificate_folder=/data/misc/user/0/cacerts-added
+if [ -f "$STATE/no_user_cert" ]; then
+    certificate_folder="$STATE/certificates"
 fi
 
-mkdir -p /data/local/tmp/trustusercerts
+# /dev is already tmpfs and visible in existing namespaces; a new private mount isn't.
+STAGE=$(mktemp -d "$RUNTIME/cacerts.XXXXXX")
+cp "$STOCK"/* "$STAGE/"
+for cert in "$certificate_folder"/*; do
+    [ -f "$cert" ] || continue
+    cp "$cert" "$STAGE/"
+done
+touch "$STAGE/.trustusercerts"
+chown -R 0:0 "$STAGE"
+chmod 755 "$STAGE"
+chmod 644 "$STAGE"/*
+chcon -R u:object_r:system_file:s0 "$STAGE"
 
-# Create a separate temp directory, to hold the current certificates
-# Without this, when we add the mount we can't read the current certs anymore.
-mkdir -p -m 700 /data/local/tmp/tuc-ca-copy
+# The source must resolve in the target namespace for mount --bind to accept it.
+SOURCE=$STAGE
+NS_BUSYBOX="/proc/$$/root$BUSYBOX"
+inject_namespace() {
+    for target in $TARGETS; do
+        "$BUSYBOX" nsenter --mount="/proc/$1/ns/mnt" -- "$NS_BUSYBOX" sh -c '
+            set -e
+            # Remove only our previous bind mount, leaving other modules alone.
+            if [ -f "$2/.trustusercerts" ]; then
+                umount -l "$2"
+            fi
+            mount --bind "$1" "$2"
+        ' sh "$SOURCE" "$target" || return 1
+    done
+}
 
-# Copy out the existing certificates
-if [ -d "/apex/com.android.conscrypt/cacerts" ]; then
-	cp /apex/com.android.conscrypt/cacerts/* /data/local/tmp/tuc-ca-copy/
-else
-	cp /system/etc/security/cacerts/* /data/local/tmp/tuc-ca-copy/
-fi
+STAGE_PUBLISHED=true
+inject_namespace "$$"
+for pid in $Z_PIDS; do
+    inject_namespace "$pid"
+done
 
-# Create the in-memory mount on top of the system certs folder
-mount -t tmpfs tmpfs /system/etc/security/cacerts
+# BusyBox ps has no -P option. Find the already running apps by their parent PID.
+APP_PIDS=$(ps -o pid,ppid | awk -v parents=" $Z_PIDS " 'NR > 1 && index(parents, " " $2 " ") { print $1 }')
+failed=false
+for pid in $APP_PIDS; do
+    if ! inject_namespace "$pid"; then
+        if [ -d "/proc/$pid" ]; then
+            log "Could not update certificates for process $pid"
+            failed=true
+        fi
+    fi
+done
+[ "$failed" = false ] || exit 1
 
-# Copy the existing certs back into the tmpfs mount, so we keep trusting them
-mv /data/local/tmp/tuc-ca-copy/* /system/etc/security/cacerts/
-
-# Copy our new cert in, so we trust that too
-cp $certificate_folder/* /system/etc/security/cacerts/
-
-# Update the perms & selinux context labels, so everything is as readable as before
-chown root:root /system/etc/security/cacerts/*
-chmod 644 /system/etc/security/cacerts/*
-chcon u:object_r:system_file:s0 /system/etc/security/cacerts/*
-
-log "System cacerts setup completed"
-
-inject_into_apex
-
-# Delete the temp cert directory & this script itself
-rm -r /data/local/tmp/tuc-ca-copy
-
-log "System cert successfully injected"
-
-# Monitor the user certificate folder for changes
-#
-# file_list=$(ls "$certificate_folder/")
-# echo "$file_list" > /data/local/tmp/trustusercerts/current_file_list.txt
-#
-# Seems causing phone to reboot
-# while true; do
-#     monitor_user_certificate_folder
-#     /system/bin/sleep 5s
-# done
+# shortcut: old CA snapshots stay in /dev until reboot; add namespace-aware cleanup if refreshes become frequent.
+log "Certificates applied to Zygote and running apps (KSU_LATE_LOAD=${KSU_LATE_LOAD:-0})"

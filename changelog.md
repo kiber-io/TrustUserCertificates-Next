@@ -1,3 +1,11 @@
+# v1.3
+
+* Support KernelSU late-load and temporary root through DFRoot.
+* Add an Action button to apply certificate changes without rebooting.
+* Fix BusyBox mount commands and injection into already running app namespaces.
+* Preserve stock certificates across repeated actions and stop on setup errors.
+* Write logs to /data/adb/trustusercerts/module.log.
+
 # v1.2
 
 * Change module description
