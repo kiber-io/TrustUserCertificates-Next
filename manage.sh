@@ -180,7 +180,7 @@ OLD_GLOBAL=$STOCK
 if [ -L "$RUNTIME/global.applied" ]; then OLD_GLOBAL=$(readlink -f "$RUNTIME/global.applied"); fi
 awk '$1 == "@global" {print $2 ($3 == "" ? "" : " " $3)}' "$WORK/rules" > "$WORK/global-certs"
 if [ -f "$SETTINGS/global-certs" ]; then cp "$SETTINGS/global-certs" "$WORK/old-global-certs"; else : > "$WORK/old-global-certs"; fi
-if ! cmp -s "$WORK/global-certs" "$WORK/old-global-certs" || { [ -s "$WORK/global-certs" ] && [ ! -L "$RUNTIME/global.applied" ]; }; then
+if [ "$command" = apply ] || ! cmp -s "$WORK/global-certs" "$WORK/old-global-certs" || { [ -s "$WORK/global-certs" ] && [ ! -L "$RUNTIME/global.applied" ]; }; then
     GLOBAL_TOUCHED=true
     apply_global "$STAGE/global" || fail 'Could not apply global certificates; reverting mounts'
 fi

@@ -446,6 +446,28 @@ apply_global() {
         self.assertEqual(self.snapshot(), before)
         self.assertEqual(self.stops.read_text(), "")
 
+    def test_explicit_apply_reapplies_unchanged_global_mounts_and_rolls_back_on_failure(self):
+        self.import_ca()
+        first = self.certificates[1][0]
+        self.policy("@global " + first, "com.first.app " + first + " off")
+        self.global_calls.write_text("")
+        self.run_manage("prepare")
+        self.assertEqual(self.global_calls.read_text(), "", "Ordinary prepare must not force unchanged mounts")
+        self.stops.write_text("")
+        self.run_manage("apply")
+        calls = self.global_calls.read_text().splitlines()
+        self.assertEqual(calls, [str((self.runtime / "current/global").resolve())])
+        self.assertEqual(self.status()["assignments"], {"com.first.app": {first: "off"}})
+        self.assertEqual(self.stops.read_text().splitlines(), ["com.first.app"])
+        before = self.snapshot()
+        self.stops.write_text("")
+        self.run_manage("apply", success=False, FAIL_GLOBAL="1")
+        self.assertEqual(self.snapshot(), before)
+        failed_calls = self.global_calls.read_text().splitlines()
+        self.assertEqual(len(failed_calls), 3)
+        self.assertEqual(failed_calls[-1], calls[-1], "Failed reapply must restore the previous global source")
+        self.assertEqual(self.stops.read_text(), "")
+
     def test_global_mode_changes_are_published_even_when_certificate_name_is_same(self):
         self.import_ca()
         self.user_baseline(0, 0)

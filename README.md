@@ -50,7 +50,7 @@ uses KernelSU's dynamic palette when available, with light/dark fallbacks.
 ## Install and configure
 
 1. Install a Zygisk provider if using KernelSU, and activate it.
-2. Install the **built** `tuc-next-v2.5.zip` in KernelSU.
+2. Install the **built** `tuc-next-v2.5.1.zip` in KernelSU.
    A ZIP of the repository source is not installable: it lacks compiled libraries
    and the certificate helper.
 3. Activate the module, then open its **WebUI** in KernelSU.
@@ -103,6 +103,7 @@ User stores are never mounted into Zygote or a shared system namespace.
 
 **Reapply** on Overview and the manager's **Action** button both reapply the saved
 policy and stop configured apps. They do not save pending WebUI edits or reopen apps.
+Explicit reapplication restores global System mounts even when the policy is unchanged.
 Saving assignments normally needs no device reboot: reopen the stopped apps.
 After a WebUI-only update, close and reopen the WebUI.
 

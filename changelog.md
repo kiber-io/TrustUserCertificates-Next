@@ -1,3 +1,7 @@
+# v2.5.1
+
+* Make Action and WebUI Reapply restore global mounts even when the saved policy is unchanged.
+
 # v2.5
 
 * Rename the module to TUC Next and release archives to tuc-next, keeping the existing module ID and settings.
