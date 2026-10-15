@@ -40,12 +40,29 @@ jobs:
     steps:
       - uses: actions/checkout@v3
         name: Checkout
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Set up Android build tools
+        run: |
+          sdkmanager 'ndk;29.0.13113456' 'build-tools;35.0.0' 'platforms;android-35'
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/29.0.13113456" >> "$GITHUB_ENV"
+      - name: Check certificate handling, WebUI and backend
+        run: |
+          bash .github/tests/test-certificates.sh
+          node tests/webui.test.js
+          python3 .github/tests/test-manage.py
+          c++ -std=c++17 -Wall -Wextra -Werror native/protocol_test.cpp -o /tmp/tuc-protocol-test
+          /tmp/tuc-protocol-test
+          bash -c 'exec -a zygote64 /tmp/tuc-protocol-test --zygote-name-check'
       - name: Create module ZIP
         id: zip
         run: |
           ZIPNAME=${{ needs.get_vars.outputs.id }}-${{ needs.get_vars.outputs.version }}.zip
           echo zipname=$ZIPNAME >> $GITHUB_OUTPUT
-          zip -0qry ./$ZIPNAME * -x .github ${{ needs.get_vars.outputs.zip_exclude }}
+          bash tools/build.sh
+          cp .artifacts/TrustUserCertificates-${{ needs.get_vars.outputs.version }}.zip "$ZIPNAME"
       
       - name: Generate update JSON
         run: bash .github/bin/updateJson.sh ${{ needs.get_vars.outputs.version }} ${{ needs.get_vars.outputs.versionCode }} changelog.md ${{ steps.zip.outputs.zipname }}

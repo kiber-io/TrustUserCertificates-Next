@@ -3,20 +3,19 @@ if [ "$API" -lt 26 ]; then
     abort "- !!! You can't use this module on Android < 8.0"
 fi
 
-# create folder to add customized settings
-if [ ! -d "/data/adb/trustusercerts" ]; then
-	mkdir -p /data/adb/trustusercerts
-fi
-
-if [ ! -d "/data/adb/trustusercerts/certificates" ]; then
-    mkdir -p /data/adb/trustusercerts/certificates
-fi
-
-ui_print "- Completed"
-if [ "$KSU" = true ]; then
-    ui_print "- For temporary root, apply now from a root shell:"
-    ui_print "  KSU=true /data/adb/ksu/bin/busybox sh $MODPATH/action.sh"
-    ui_print "- For diabl0w KernelSU, enable Auto Soft Reboot in DFRoot to activate modules."
-    ui_print "- Once KernelSU activates this module, use its Action button to refresh certificates."
-fi
-ui_print "- If you want to add certificates without adding them into user certificates, please create a file named /data/adb/trustusercerts/no_user_cert and put certificates into /data/adb/trustusercerts/certificates"
+[ -f "$MODPATH/cert-tool.jar" ] || abort '- Missing certificate helper: install the built module ZIP'
+case "$ARCH" in
+    arm64) ZYGISK_ABI=arm64-v8a ;;
+    arm) ZYGISK_ABI=armeabi-v7a ;;
+    x64) ZYGISK_ABI=x86_64 ;;
+    x86) ZYGISK_ABI=x86 ;;
+    *) abort '- Unsupported architecture' ;;
+esac
+[ -f "$MODPATH/zygisk/$ZYGISK_ABI.so" ] || abort '- Missing Zygisk library for this architecture'
+ui_print '- Selective trust requires Zygisk (Zygisk Next, ReZygisk or NeoZygisk on KernelSU).'
+ui_print '- Open module WebUI to import a CA and select applications.'
+ui_print '- No applications are selected by default. User certificates are not imported.'
+ui_print '- After upgrading from global injection: fully reboot before testing isolation.'
+ui_print '- DFRoot: restore root and activate modules; a soft reboot may be required.'
+ui_print '- NeoZygisk updates: fully reboot, then restore DFRoot root to reload native libraries.'
+ui_print '- Applying changes stops selected applications; save your work first.'

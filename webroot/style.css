@@ -1,0 +1,106 @@
+/* KernelSU serves /internal/colors.css locally; older managers use the palette below. */
+:root {
+  color-scheme: light dark;
+  font-family: Roboto, system-ui, sans-serif;
+  --fallback-bg: #fdf7ff; --fallback-surface: #f3edf7; --fallback-text: #1d1b20;
+  --fallback-muted: #49454f; --fallback-primary: #65558f; --fallback-on-primary: #fff;
+  --fallback-container: #eaddff; --fallback-on-container: #21005d;
+  --fallback-outline: #cac4d0; --fallback-error: #b3261e; --fallback-error-bg: #f9dedc;
+  --bg: var(--background, var(--fallback-bg));
+  --surface: var(--surfaceContainerLow, var(--fallback-surface));
+  --text: var(--onSurface, var(--fallback-text));
+  --muted: var(--onSurfaceVariant, var(--fallback-muted));
+  --accent: var(--primary, var(--fallback-primary));
+  --on-accent: var(--onPrimary, var(--fallback-on-primary));
+  --soft: var(--secondaryContainer, var(--fallback-container));
+  --on-soft: var(--onSecondaryContainer, var(--fallback-on-container));
+  --line: var(--outlineVariant, var(--fallback-outline));
+  --error-text: var(--error, var(--fallback-error));
+  --error-bg: var(--errorContainer, var(--fallback-error-bg));
+}
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+[hidden] { display: none !important; }
+body { margin: 0; background: var(--bg); color: var(--text); }
+main { max-width: 760px; margin: auto; padding: max(20px, env(safe-area-inset-top)) 16px calc(172px + env(safe-area-inset-bottom)); }
+h2 { font-size: 20px; font-weight: 500; line-height: 1.3; margin: 0; }
+.card { padding: 22px; background: var(--surface); border-radius: 24px; margin: 0 0 16px; }
+.section-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.section-title h2 { min-width: 0; overflow-wrap: anywhere; }
+.count { flex-shrink: 0; min-width: 30px; text-align: center; padding: 5px 10px; background: var(--soft); color: var(--on-soft); font-size: 13px; border-radius: 16px; }
+p { line-height: 1.55; }
+.hint { color: var(--muted); font-size: 13px; line-height: 1.6; }
+button { border: 0; border-radius: 28px; padding: 14px 20px; background: var(--accent); color: var(--on-accent); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; min-height: 48px; }
+button { width: 100%; }
+button.secondary { background: var(--soft); color: var(--on-soft); }
+button:disabled, input:disabled { opacity: .45; cursor: default; }
+:focus-visible { outline: 3px solid var(--accent); outline-offset: 4px; }
+.search-label { display: block; font-size: 12px; margin: 20px 0 8px; color: var(--muted); }
+input[type=search] { width: 100%; font: inherit; padding: 16px 20px; border: 1px solid var(--line); border-radius: 28px; background: var(--bg); color: var(--text); }
+.select-trigger { display: inline-flex; align-items: center; justify-content: space-between; gap: 8px; background: var(--bg); color: var(--text); border: 1px solid var(--line); font-weight: 500; }
+.select-trigger::after { content: '⌄'; font-size: 17px; line-height: 1; }
+.select-trigger[aria-expanded=true] { border-color: var(--accent); background: var(--soft); color: var(--on-soft); }
+.select-trigger:active, .choice-option:active { background: var(--soft); color: var(--on-soft); }
+.profile-filter { border-radius: 16px; padding: 14px 18px; text-align: left; }
+.choice-menu { position: fixed; z-index: 8; overflow: auto; overscroll-behavior: contain; padding: 8px 0; border-radius: 16px; background: var(--surfaceContainerHigh, var(--surface)); color: var(--text); box-shadow: 0 6px 20px #0004, 0 2px 5px #0002; animation: menu-in .14s ease-out; outline-offset: 2px; }
+button.choice-option { display: flex; align-items: center; justify-content: space-between; gap: 18px; width: 100%; min-height: 48px; border-radius: 0; padding: 12px 18px; background: transparent; color: inherit; text-align: left; font-size: 14px; font-weight: 400; overflow-wrap: anywhere; }
+.choice-option[aria-selected=true] { color: var(--accent); font-weight: 600; }
+.choice-option[aria-selected=true]::after { content: '✓'; }
+.choice-option[data-active=true], .choice-option:hover { background: var(--soft); color: var(--on-soft); }
+@keyframes menu-in { from { opacity: 0; transform: scale(.96); } to { opacity: 1; transform: scale(1); } }
+@media (prefers-reduced-motion: reduce) { .choice-menu { animation: none; } }
+.overview-status { margin-top: 0; font-size: 20px; }
+.overview-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 24px 0; }
+.overview-stats strong, .overview-stats span { display: block; }
+.overview-stats strong { font-size: 28px; font-weight: 400; margin-bottom: 5px; }
+.overview-stats span { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.actions { display: flex; gap: 10px; }
+.actions button { min-width: 0; padding: 12px; }
+.save-fab { position: fixed; right: max(20px, calc((100vw - 760px) / 2 + 20px)); bottom: calc(96px + env(safe-area-inset-bottom)); width: auto; min-width: 96px; min-height: 56px; border-radius: 18px; z-index: 4; box-shadow: 0 3px 10px #0003; }
+.app-list-card { padding-top: 4px; padding-bottom: 4px; }
+.app { padding: 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; font-size: 14px; }
+.app:last-child { border-bottom: 0; }
+.app-summary { display: flex; align-items: center; gap: 16px; min-height: 88px; padding: 16px 0; font-size: 14px; list-style: none; }
+.app-summary::-webkit-details-marker { display: none; }
+.app-summary::after { content: '⌄'; margin-left: auto; font-size: 20px; color: var(--muted); flex-shrink: 0; }
+.app[open] .app-summary::after { transform: rotate(180deg); }
+.app-icon { width: 44px; height: 44px; border-radius: 13px; background: var(--soft); color: var(--on-soft); display: grid; place-items: center; flex-shrink: 0; position: relative; font-size: 22px; }
+.app-icon img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; border-radius: inherit; }
+.app-name { min-width: 0; }
+.app-name strong, .app-name small { display: block; }
+.app-name strong { font-size: 15px; font-weight: 500; line-height: 1.4; }
+.app-name small { margin-top: 4px; font-size: 11px; color: var(--muted); font-weight: 400; }
+.app-name small.app-enabled { color: var(--accent); font-weight: 600; }
+.app-name small.profile-badge { display: inline-block; background: var(--soft); color: var(--on-soft); padding: 2px 7px; border-radius: 6px; }
+.app input { width: 21px; height: 21px; margin: 0; flex-shrink: 0; accent-color: var(--accent); }
+.app-certificates { min-width: 0; border: 0; padding: 0 0 16px; margin: 0; }
+.certificate-choice { display: flex; align-items: center; gap: 14px; cursor: pointer; padding: 12px 0; min-height: 48px; }
+.certificate-choice > span { min-width: 0; overflow-wrap: anywhere; }
+.certificate-choice .trust-mode { width: 100px; min-height: 48px; flex-shrink: 0; padding: 10px 10px; border-radius: 12px; font-size: 12px; }
+.certificate-choice strong, .certificate-choice small { display: block; line-height: 1.5; }
+.certificate-choice strong { font-size: 13px; font-weight: 500; }
+.certificate-choice small { font-size: 10px; color: var(--muted); font-family: monospace; margin-top: 4px; }
+.certificates { list-style: none; padding: 0; margin: 16px 0; }
+.certificate { padding: 18px 0; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
+.certificate strong, .certificate small { display: block; margin-bottom: 10px; }
+.certificate strong { font-size: 14px; font-weight: 500; line-height: 1.5; }
+.certificate small { font-family: monospace; color: var(--muted); line-height: 1.5; }
+.certificate-details { margin: 12px 0; color: var(--muted); font-size: 12px; }
+.certificate-details summary { font-size: 12px; font-weight: 400; }
+.certificate button { width: auto; padding: 10px 18px; min-height: 44px; color: var(--error-text); background: transparent; border: 1px solid var(--line); }
+.error-card { padding: 16px 20px; border-radius: 20px; background: var(--error-bg); color: var(--onErrorContainer, var(--fallback-error)); overflow-wrap: anywhere; }
+#message:empty, #selection-note:empty, #status-reason:empty { display: none; }
+.operation { position: sticky; top: max(8px, env(safe-area-inset-top)); z-index: 3; display: flex; align-items: center; gap: 12px; padding: 16px 20px; margin: 0 0 16px; border-radius: 20px; background: var(--soft); color: var(--on-soft); font-size: 13px; line-height: 1.5; }
+.spinner, button[aria-busy=true]::before { display: inline-block; width: 20px; height: 20px; flex-shrink: 0; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .8s linear infinite; will-change: transform; }
+button[aria-busy=true] { display: flex; align-items: center; justify-content: center; gap: 12px; opacity: 1; }
+button[aria-busy=true]::before { content: ''; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner, button[aria-busy=true]::before { animation: none; } }
+summary { cursor: pointer; font-size: 18px; font-weight: 500; min-height: 28px; }
+pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 1.65; max-height: 55vh; overflow: auto; margin-bottom: 0; }
+.bottom-nav { position: fixed; bottom: 0; left: 50%; transform: translateX(-50%); width: 100%; max-width: 760px; display: grid; grid-template-columns: repeat(3, 1fr); padding: 10px 8px calc(10px + env(safe-area-inset-bottom)); background: var(--surfaceContainer, var(--fallback-surface)); z-index: 2; border-top: 1px solid var(--line); }
+button.nav-item { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; background: transparent; color: var(--muted); border-radius: 16px; padding: 2px 0; min-width: 0; font-size: 11px; font-weight: 500; min-height: 58px; }
+.nav-icon { display: grid; place-items: center; width: 64px; height: 30px; border-radius: 20px; }
+.nav-icon svg { width: 23px; height: 23px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.nav-item[aria-selected=true] { color: var(--text); font-weight: 700; }
+.nav-item[aria-selected=true] .nav-icon { background: var(--soft); color: var(--on-soft); }
+@media (prefers-color-scheme: dark) { :root { --fallback-bg: #141218; --fallback-surface: #211f26; --fallback-text: #e6e0e9; --fallback-muted: #cac4d0; --fallback-primary: #d0bcff; --fallback-on-primary: #381e72; --fallback-container: #4a4458; --fallback-on-container: #e8def8; --fallback-outline: #49454f; --fallback-error: #f2b8b5; --fallback-error-bg: #601410; } }
