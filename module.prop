@@ -5,4 +5,4 @@ versionCode=2500
 author=lupohan44, kiber.io
 description=Per-app and global CA injection as System, User or Both, configured through KernelSU WebUI. Requires Zygisk.
 minMagisk=26000
-updateJson=https://github.com/lupohan44/TrustUserCertificates/releases/latest/download/update.json
+updateJson=https://github.com/kiber-io/TrustUserCertificates-Next/releases/latest/download/update.json
