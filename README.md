@@ -1,4 +1,4 @@
-# Trust User Certificates
+# TUC Next
 
 Per-application System and User CA trust for Android 8.0+, maintained by lupohan44 and kiber.io. Requires Zygisk
 API 4: Magisk 26+ with Zygisk enabled, or KernelSU with a compatible Zygisk Next,
@@ -22,7 +22,7 @@ KernelSU command bridge only carries the compact app list.
 ## Install and configure
 
 1. Install a Zygisk provider if using KernelSU, and activate it.
-2. Install the **built** `TrustUserCertificates-v2.5.zip` in KernelSU.
+2. Install the **built** `tuc-next-v2.5.zip` in KernelSU.
    A ZIP of the repository source is not installable: it lacks compiled libraries
    and the certificate helper.
 3. Activate the module, then open its **WebUI** in KernelSU.

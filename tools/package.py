@@ -7,7 +7,7 @@ build = Path(sys.argv[1])
 root = Path(__file__).resolve().parent.parent
 version = next(line.split('=', 1)[1] for line in (root / 'module.prop').read_text().splitlines() if line.startswith('version='))
 assert version and all(char.isalnum() or char in '.-_' for char in version)
-output = root / '.artifacts' / f'TrustUserCertificates-{version}.zip'
+output = root / '.artifacts' / f'tuc-next-{version}.zip'
 with zipfile.ZipFile(output, 'w', zipfile.ZIP_DEFLATED) as archive:
     for name in ('module.prop', 'customize.sh', 'service.sh', 'action.sh', 'manage.sh', 'global.sh', 'LICENSE'):
         archive.write(root / name, name)

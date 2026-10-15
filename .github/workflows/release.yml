@@ -59,10 +59,10 @@ jobs:
       - name: Create module ZIP
         id: zip
         run: |
-          ZIPNAME=${{ needs.get_vars.outputs.id }}-${{ needs.get_vars.outputs.version }}.zip
+          ZIPNAME=tuc-next-${{ needs.get_vars.outputs.version }}.zip
           echo zipname=$ZIPNAME >> $GITHUB_OUTPUT
           bash tools/build.sh
-          cp .artifacts/TrustUserCertificates-${{ needs.get_vars.outputs.version }}.zip "$ZIPNAME"
+          cp ".artifacts/$ZIPNAME" "$ZIPNAME"
       
       - name: Generate update JSON
         run: bash .github/bin/updateJson.sh ${{ needs.get_vars.outputs.version }} ${{ needs.get_vars.outputs.versionCode }} changelog.md ${{ steps.zip.outputs.zipname }}

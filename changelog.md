@@ -1,5 +1,6 @@
 # v2.5
 
+* Rename the module to TUC Next and release archives to tuc-next, keeping the existing module ID and settings.
 * Override global certificate modes per app and profile with Inherit, Off, System, User or Both.
 * Keep the save notice visible so editing assignments does not move the app list.
 
