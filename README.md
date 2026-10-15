@@ -1,7 +1,7 @@
 # TUC Next
 
-**TUC Next** is a continuation of Trust User Certificates by lupohan44, maintained
-by lupohan44 and kiber.io. It lets you choose which imported CA certificates Android
+**TUC Next** is a fork of [Trust User Certificates](https://github.com/lupohan44/TrustUserCertificates)
+by lupohan44, modified and maintained by kiber.io. It lets you choose which imported CA certificates Android
 apps receive, either individually or through an optional global policy.
 
 Supports Android 8.0+ and requires Zygisk API 4: Magisk 26+ with Zygisk enabled,
@@ -197,7 +197,9 @@ NDK 29.0.13113456, set `JAVA_HOME`, `ANDROID_HOME` and `ANDROID_NDK_HOME`, then 
 bash tools/build.sh
 ```
 
-The installable ZIP appears under `.artifacts/`, with native libraries for arm64,
+The installable `tuc-next-VERSION.zip` and matching `tuc-next-VERSION-source.zip`
+appear under `.artifacts/`. The source archive includes the code, build scripts
+and build instructions. The installable ZIP includes native libraries for arm64,
 ARM32, x86-64 and x86. No JavaScript package installation is needed.
 
 Host checks (Java, OpenSSL, Node, Python and a C++ compiler):
@@ -227,3 +229,21 @@ reopen both apps and check again. Account for apps that already trust this CA,
 use their own verifier or delegate networking to excluded processes.
 
 See [native/README.md](native/README.md) for the Zygisk protocol and mount lifecycle.
+
+## License and source
+
+TUC Next is distributed under the **GNU Affero General Public License, version 3**
+([LICENSE](LICENSE)), without warranty. You may redistribute and modify it under
+that license. Original author: lupohan44. Fork modifications: kiber.io,
+2026-10-15, including selective and global CA policies, System/User modes,
+multi-profile support, Zygisk integration and the WebUI.
+
+Source: [kiber-io/TrustUserCertificates-Next](https://github.com/kiber-io/TrustUserCertificates-Next).
+Each binary release must be accompanied by its matching `tuc-next-VERSION-source.zip`
+at the same release download location, at no additional charge. Publish the code
+used to build the release; a link to an unrelated or older revision is insufficient.
+
+See [NOTICE](NOTICE) for attribution and the separate permissive license of the
+Zygisk API header. The original project's README also credits
+[HTTP Toolkit](https://httptoolkit.com/blog/android-14-install-system-ca-certificate/)
+for its main certificate injection logic.

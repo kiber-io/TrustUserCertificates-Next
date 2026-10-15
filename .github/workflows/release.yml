@@ -60,9 +60,12 @@ jobs:
         id: zip
         run: |
           ZIPNAME=tuc-next-${{ needs.get_vars.outputs.version }}.zip
+          SOURCE_ZIPNAME=tuc-next-${{ needs.get_vars.outputs.version }}-source.zip
           echo zipname=$ZIPNAME >> $GITHUB_OUTPUT
+          echo sourcezipname=$SOURCE_ZIPNAME >> $GITHUB_OUTPUT
           bash tools/build.sh
           cp ".artifacts/$ZIPNAME" "$ZIPNAME"
+          cp ".artifacts/$SOURCE_ZIPNAME" "$SOURCE_ZIPNAME"
       
       - name: Generate update JSON
         run: bash .github/bin/updateJson.sh ${{ needs.get_vars.outputs.version }} ${{ needs.get_vars.outputs.versionCode }} changelog.md ${{ steps.zip.outputs.zipname }}
@@ -70,7 +73,10 @@ jobs:
       - name: Release
         uses: softprops/action-gh-release@v1
         with:
+          body: |
+            TUC Next is distributed under GNU AGPLv3. The matching source code and build scripts are available in the attached ${{ steps.zip.outputs.sourcezipname }} archive at no additional charge. See LICENSE and NOTICE inside the archives.
           files: |
             changelog.md
             ${{ steps.zip.outputs.zipname }}
+            ${{ steps.zip.outputs.sourcezipname }}
             update.json
