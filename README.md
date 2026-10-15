@@ -1,23 +1,51 @@
 # TUC Next
 
-Per-application System and User CA trust for Android 8.0+, maintained by lupohan44 and kiber.io. Requires Zygisk
-API 4: Magisk 26+ with Zygisk enabled, or KernelSU with a compatible Zygisk Next,
-ReZygisk or NeoZygisk installation. Configuration uses KernelSU's module WebUI.
+**TUC Next** is a continuation of Trust User Certificates by lupohan44, maintained
+by lupohan44 and kiber.io. It lets you choose which imported CA certificates Android
+apps receive, either individually or through an optional global policy.
 
-Import CAs and choose which ones each application receives in the WebUI. Each
-application receives its selected CAs as System, User or Both. An
-optional global CA set applies to all supported apps. Each app can inherit a CA's
-global mode, exclude it with Off, or replace its mode with System, User or Both. The global set is empty by
-default. Existing Android user CAs are preserved; imports into the module's library
-are explicit. The system partition is never modified.
+Supports Android 8.0+ and requires Zygisk API 4: Magisk 26+ with Zygisk enabled,
+or KernelSU with a compatible Zygisk Next, ReZygisk or NeoZygisk installation.
+Configuration uses KernelSU's module WebUI.
 
-The Material 3 WebUI opens on Overview, followed by Certificates and Apps.
-Logs are collapsed by default. A save FAB appears only when the trust policy has
-unsaved changes. App assignments are independent for each Android user and work profile.
-It uses the manager's dynamic palette through KernelSU's local
-`/internal/colors.css` when available, falling back to a standard light/dark theme
-on managers without that feature. App icons are stored as local PNG assets so the
-KernelSU command bridge only carries the compact app list.
+The module keeps its internal ID, `trustusercerts`, so TUC Next updates the existing
+installation and retains its saved certificate library and policy. It does not
+modify the system partition or install certificates into Android's real user store.
+
+## Certificate modes
+
+Import a CA into the module's library, then assign it globally or to a particular
+app. Importing alone grants no trust. The global policy is empty by default.
+
+| Mode | Effect for the selected app and profile |
+| --- | --- |
+| Inherit | Use this CA's global setting. If it has no global assignment, inject nothing. |
+| Off | Exclude this CA from the module's injection for this app, even when enabled globally. |
+| System | Expose this CA through the app's system certificate stores. |
+| User | Expose this CA through the profile's user certificate store in the app's private namespace. |
+| Both | Expose this CA through both stores. |
+
+Each explicit app setting **replaces** that CA's global mode. For example, a global
+System CA can be User-only in Talk, or Off in another app. Inherit restores the
+global behavior. Global assignments offer Off, System, User and Both; Inherit is
+only an app setting.
+
+Off only excludes the module's copy. It does not remove an existing Android CA or
+override an app's own trust store. Original Android system and user CAs are preserved.
+The same package in a personal profile, work profile or secondary user has independent
+assignments; use the profile filter to select the intended copy.
+
+## WebUI
+
+The Material 3 interface has three tabs:
+
+* **Overview**: module status, Reapply and collapsed diagnostic logs.
+* **Certificates**: import or delete CAs and configure global trust.
+* **Apps**: search by app name or package, filter profiles and configure per-app modes.
+
+Individually configured apps sort first, including apps with explicit Off rules.
+A floating Save button appears only while policy edits are pending. The interface
+uses KernelSU's dynamic palette when available, with light/dark fallbacks.
 
 ## Install and configure
 
@@ -46,7 +74,15 @@ all otherwise valid certificate chains from that CA, rather than a particular
 website. Pinning and applications using their own trust stores can still reject
 connections.
 
-User mode overlays `/data/misc/user/USER_ID/cacerts-added` only in the target
+## How injection works
+
+The backend builds certificate snapshots from the original Android stores and the
+saved policy. Zygisk selects the snapshot for the app's full Android UID and package
+and mounts it in that process's private mount namespace. An app with an explicit
+Off rule still receives a snapshot so the module can exclude a globally injected CA.
+
+System mode overlays the system CA directory and the Conscrypt APEX CA directory
+where present. User mode overlays `/data/misc/user/USER_ID/cacerts-added` only in the target
 process's private mount namespace, preserving that profile's original user CAs.
 It does not install certificates through Android's certificate manager or change
 the real user store. The app must allow user CA trust in its network security
@@ -55,8 +91,8 @@ configuration. System mode remains the default for existing assignments.
 WebView can classify a CA found in the system store as a known system root and
 apply additional certificate policies. User-only mode avoids this classification
 only if the same trust anchor is absent from the app's system store. A per-app
-User override also excludes that CA's global System injection. Both may still trigger those policies. Expiry, hostname and chain
-signature checks remain in place.
+User override also excludes that CA's global System injection. Both may still
+trigger those policies. Expiry, hostname and chain signature checks remain in place.
 
 Global System changes update Zygote and running app mount namespaces. They do not force
 stop every application; restart affected apps to clear TLS caches, especially when
@@ -64,6 +100,13 @@ removing global trust. Individual applications affected by a policy change are
 stopped and must be reopened manually.
 Global User assignments apply when app processes start; restart affected apps.
 User stores are never mounted into Zygote or a shared system namespace.
+
+**Reapply** on Overview and the manager's **Action** button both reapply the saved
+policy and stop configured apps. They do not save pending WebUI edits or reopen apps.
+Saving assignments normally needs no device reboot: reopen the stopped apps.
+After a WebUI-only update, close and reopen the WebUI.
+
+## Updates and temporary root
 
 When upgrading from v2.0, certificate files remain in the library, but the old
 shared app allowlist does not grant certificates in the new per-CA policy. Choose
@@ -75,7 +118,7 @@ architecture, not proof that a particular TLS connection used an imported CA.
 Open an ordinary app and reopen/refresh the WebUI if no callback has appeared yet.
 Per-process mount results are shown in the collapsed log on **Overview**.
 
-## Upgrading from global injection
+### Upgrading from global injection
 
 Version 1.x injects globally. Its mounts and applications' cached trust decisions
 survive a module update. Install this version and **fully reboot** before testing
@@ -86,7 +129,7 @@ If this CA is also installed in Android's user certificate store, remove that
 copy yourself before testing exclusive trust: apps that already accept user CAs
 can otherwise continue trusting it. The module never deletes Android user CAs.
 
-## Temporary root / DFRoot
+### Temporary root / DFRoot
 
 Temporary root can provide the permissions needed by both modules, but the Zygisk
 provider and this module must actually be activated. Merely staging a ZIP in
@@ -99,8 +142,10 @@ while retaining the running kernel; save your work before using it. It does not
 replace the full reboot needed to clear an old global injection installation.
 NeoZygisk v2.4 also caches module libraries in its persistent daemon. A soft
 reboot can restart Zygote while leaving that daemon's previous library cached.
-After updating this module with NeoZygisk v2.4, fully reboot, restore temporary
-root, and activate modules again to ensure the new native library is loaded.
+After an update that changes this module's native Zygisk libraries with NeoZygisk
+v2.4, fully reboot, restore temporary root, and activate modules again to ensure
+the new native library is loaded. Changes limited to the WebUI or scripts do not
+require reloading those libraries.
 Leave **Disable KSU Modules** off when intentionally loading these modules.
 
 After a full reboot, restore root and activate modules again. Certificate settings
@@ -120,7 +165,8 @@ work profiles and secondary users. Android's full UID identifies the selected co
 Isolated processes (including some WebView/network workers),
 SDK sandboxes, child Zygotes and system UIDs are excluded. Applications excluded
 from Zygisk injection may lose globally selected certificates when Android rebuilds
-their APEX namespace. Both modes require Zygisk for reliable per-process application.
+their APEX namespace. System and User injection both require Zygisk for reliable
+per-process application.
 Applications sharing an Android UID are not a security boundary. Optional global
 injection also changes shared system trust namespaces, including Zygote and existing
 app namespaces, so its effects can extend beyond the ordinary apps supported by
