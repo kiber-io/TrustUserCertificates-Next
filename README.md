@@ -50,7 +50,7 @@ uses KernelSU's dynamic palette when available, with light/dark fallbacks.
 ## Install and configure
 
 1. Install a Zygisk provider if using KernelSU, and activate it.
-2. Install the **built** `tuc-next-v2.5.1.zip` in KernelSU.
+2. Install the **built** `tuc-next-v2.5.2.zip` in KernelSU.
    A ZIP of the repository source is not installable: it lacks compiled libraries
    and the certificate helper.
 3. Activate the module, then open its **WebUI** in KernelSU.
@@ -173,8 +173,11 @@ injection also changes shared system trust namespaces, including Zygote and exis
 app namespaces, so its effects can extend beyond the ordinary apps supported by
 the native callback.
 
-User-mode target directories must already exist for the selected Android user;
-the module reports missing stores rather than creating or changing real user data.
+If an existing Android profile has no `cacerts-added` directory, the module creates
+an empty mount point with that profile's system ownership and Android SELinux label.
+It never writes imported CA files there. Failed updates remove newly created empty
+mount points; existing stores and their certificates are preserved. Missing profile
+data directories, invalid paths and permission failures still abort the update.
 
 Logs: `/data/adb/trustusercerts/module.log`, also visible in the WebUI. Failed
 injections include the phase and errno. Settings

@@ -5,6 +5,10 @@ import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.RandomAccessFile;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.LinkOption;
+import java.nio.file.NoSuchFileException;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.security.MessageDigest;
 import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
@@ -232,8 +236,15 @@ public final class CertTool {
         Set<String> user = selected(modes, 2);
         if (!user.isEmpty()) for (int id : users) {
             File baseline = new File(userBase, id + "/cacerts-added");
-            if (!baseline.isDirectory()) {
+            if (!baseline.getParentFile().isDirectory()) {
                 throw new IllegalArgumentException("User certificate directory is unavailable for Android user " + id + ": " + baseline);
+            }
+            try {
+                if (!Files.readAttributes(baseline.toPath(), BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS).isDirectory()) {
+                    throw new IllegalArgumentException("Invalid user certificate directory for Android user " + id + ": " + baseline);
+                }
+            } catch (NoSuchFileException absent) {
+                baseline = null;
             }
             prepareStore(new File(root, "user/" + id), baseline, custom, user, marker);
         }
@@ -242,7 +253,7 @@ public final class CertTool {
     private static void prepareStore(File dest, File stock, File custom,
                                      Set<String> selected, String marker) throws Exception {
         if (!dest.mkdirs()) throw new IllegalArgumentException("Cannot create " + dest);
-        for (File file : certificates(stock)) write(new File(dest, file.getName()), read(file));
+        if (stock != null) for (File file : certificates(stock)) write(new File(dest, file.getName()), read(file));
         for (String name : selected) store(dest, parse(read(new File(custom, name)), true));
         write(new File(dest, marker), new byte[0]);
     }

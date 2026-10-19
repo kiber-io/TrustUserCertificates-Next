@@ -30,13 +30,15 @@ system labels. The native module does not relabel files or modify SELinux policy
 When global CAs are enabled, `global/enabled` is a zero-byte regular file and
 `global/{system,apex}` contains their merged trust stores. An ordinary app without
 an explicit package entry uses that global snapshot; explicit entries retain
-their per-package union. This reapplies APEX mounts after specialization, which
+their per-package overrides. This reapplies APEX mounts after specialization, which
 can replace the mount inherited from Zygote.
 When a `user/USER_ID` source exists, the worker also binds it read-only onto
 `/data/misc/user/USER_ID/cacerts-added` inside that app's private namespace.
 Missing user sources leave the original user store untouched. A supplied user
-source with a missing target fails with `user-target`; the module never creates
-real user-store directories, mounts them into Zygote, or changes original files.
+source with a missing target fails with `user-target`. Before publication, the
+backend initializes missing `cacerts-added` directories as empty Android-owned
+mount points for existing profiles. It never writes CA files into them, mounts
+user stores into Zygote, or changes original CA files.
 All applied stores are rolled back on ordinary source/bind/remount errors,
 including when the optional APEX store is absent.
 Snapshot directories and config must remain root-owned and unwritable by apps.

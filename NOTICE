@@ -9,6 +9,10 @@ certificate policies, System/User/Both modes, work-profile and secondary-user
 support, Zygisk integration, and a Material 3 KernelSU WebUI.
 This is a modified fork, not an official release by the original author.
 
+Further modified by kiber.io on 2026-10-19 to support User/Both injection in
+profiles with an uninitialized user CA directory, without installing CA files
+into Android's real store.
+
 The project as a whole is distributed under the GNU Affero General Public
 License, version 3. See LICENSE for the complete terms, including the
 disclaimer of warranty and the rights to modify and redistribute the work.

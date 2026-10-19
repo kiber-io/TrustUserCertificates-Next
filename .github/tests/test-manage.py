@@ -75,6 +75,7 @@ class ManageTests(unittest.TestCase):
         self.mock("chown", "exit 0\n")
         self.mock("pidof", "printf '1\\n'\n")
         self.mock("chcon", '''printf '%s\\n' "$*" >> "$CHCON_LOG"
+if [ "${FAIL_MOUNTPOINT_CHCON:-0}" = 1 ] && [ "$#" = 2 ]; then exit 1; fi
 case "$*" in *misc_user_data_file*) [ "${FAIL_USER_CHCON:-0}" != 1 ] || exit 1 ;; esac
 [ "${FAIL_CHCON:-0}" != 1 ]
 ''')
@@ -429,6 +430,37 @@ apply_global() {
         self.assertFalse((current / "apps").exists())
         self.assertEqual(original, {str(p): p.read_bytes() for p in self.user_base.rglob("*") if p.is_file()})
 
+    def test_global_user_modes_initialize_empty_profile_mountpoints_without_installing_cas(self):
+        self.env["MULTI_USER"] = "1"
+        self.import_ca()
+        baseline = self.user_baseline(0, 0)
+        (self.user_base / "10").mkdir()
+        stock, first = [cert[0] for cert in self.certificates[:2]]
+        for mode in ("user", "both"):
+            self.policy("@global " + first + " " + mode)
+            empty = self.user_base / "10/cacerts-added"
+            self.assertTrue(empty.is_dir())
+            self.assertEqual(empty.stat().st_mode & 0o777, 0o755)
+            self.assertEqual(list(empty.iterdir()), [], "Module CAs must not enter Android's real store")
+            self.assertEqual((baseline / stock).read_bytes(), self.certificates[0][1])
+            self.assertEqual(self.ca_names(self.runtime / "current/global/user/10"), {first})
+            self.assertEqual(self.ca_names(self.runtime / "current/global/user/0"), {stock, first})
+
+    def test_failed_empty_profile_setup_removes_only_new_mountpoints(self):
+        self.env["MULTI_USER"] = "1"
+        self.import_ca()
+        self.user_baseline(0, 0)
+        (self.user_base / "10").mkdir()
+        first = self.certificates[1][0]
+        before = self.snapshot()
+        for failure in ("FAIL_MOUNTPOINT_CHCON", "FAIL_GLOBAL", "FAIL_PUBLISH"):
+            with self.subTest(failure=failure):
+                self.policy("@global " + first + " user", success=False, **{failure: "1"})
+                self.assertEqual(self.snapshot(), before)
+                self.assertFalse((self.user_base / "10/cacerts-added").exists())
+                self.assertTrue((self.user_base / "10").is_dir())
+                self.assertTrue((self.user_base / "0/cacerts-added").is_dir())
+
     def test_missing_user_baseline_and_user_label_failure_preserve_generation(self):
         self.env["MULTI_USER"] = "1"
         self.import_ca()
@@ -445,6 +477,24 @@ apply_global() {
         self.policy("10:com.first.app " + first + " both", success=False, FAIL_USER_CHCON="1")
         self.assertEqual(self.snapshot(), before)
         self.assertEqual(self.stops.read_text(), "")
+
+    def test_invalid_user_mountpoint_preserves_policy_and_profile_data(self):
+        self.env["MULTI_USER"] = "1"
+        self.import_ca()
+        self.user_baseline(0, 0)
+        (self.user_base / "10").mkdir()
+        target = self.user_base / "10/cacerts-added"
+        target.symlink_to(self.user_base / "0/cacerts-added", target_is_directory=True)
+        first = self.certificates[1][0]
+        before = self.snapshot()
+        self.policy("@global " + first + " user", success=False)
+        self.assertEqual(self.snapshot(), before)
+        self.assertTrue(target.is_symlink())
+        target.unlink()
+        target.write_text("Existing profile data")
+        self.policy("10:com.first.app " + first + " both", success=False)
+        self.assertEqual(self.snapshot(), before)
+        self.assertEqual(target.read_text(), "Existing profile data")
 
     def test_explicit_apply_reapplies_unchanged_global_mounts_and_rolls_back_on_failure(self):
         self.import_ca()

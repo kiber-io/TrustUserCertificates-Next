@@ -105,6 +105,9 @@ cleanup() {
             ln -sf "$SETTINGS" "$STATE/settings.rollback"
             mv -Tf "$STATE/settings.rollback" "$STATE/settings"
         fi
+        if [ -n "$WORK" ] && [ -f "$WORK/created-user-stores" ]; then
+            while IFS= read -r user_target; do rmdir "$user_target" 2>/dev/null || true; done < "$WORK/created-user-stores"
+        fi
         [ -z "$WORK" ] || rm -rf "$WORK"
     else
         case "$SETTINGS" in "$STATE"/.settings.*) rm -rf "$SETTINGS" ;; esac
@@ -172,6 +175,25 @@ chcon -R u:object_r:system_file:s0 "$STAGE"
 for user_store in "$STAGE/global/user" "$STAGE"/apps/*/*/user; do
     [ -d "$user_store" ] || continue
     chcon -R u:object_r:misc_user_data_file:s0 "$user_store"
+done
+
+# Android may not create cacerts-added until a profile first installs a user CA.
+for user_store in "$STAGE"/global/user/* "$STAGE"/apps/*/*/user/*; do
+    [ -d "$user_store" ] || continue
+    user=${user_store##*/}
+    case "$user" in ''|*[!0-9]*|0?*) fail 'Invalid user certificate store ID' ;; esac
+    [ "$user" -le 21474 ] || fail 'User certificate store ID is out of range'
+    user_parent=$STOCK_ROOT/data/misc/user/$user
+    [ -d "$user_parent" ] && [ ! -L "$user_parent" ] || fail "User data directory is unavailable for Android user $user"
+    user_target=$user_parent/cacerts-added
+    [ ! -L "$user_target" ] || fail "User certificate directory is a symlink for Android user $user"
+    [ ! -d "$user_target" ] || continue
+    [ ! -e "$user_target" ] || fail "User certificate path is not a directory for Android user $user"
+    mkdir -m 755 "$user_target"
+    printf '%s\n' "$user_target" >> "$WORK/created-user-stores"
+    user_system_uid=$((user * 100000 + 1000))
+    chown "$user_system_uid:$user_system_uid" "$user_target"
+    chcon u:object_r:misc_user_data_file:s0 "$user_target"
 done
 
 # Publish only fully prepared generations; a process pins one generation at a time.

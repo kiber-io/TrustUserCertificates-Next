@@ -1,3 +1,8 @@
+# v2.5.2
+
+* Support global and per-app User/Both injection in profiles whose user CA directory has not been initialized.
+* Create only an empty Android-owned mount point; imported CAs remain in private process mounts.
+
 # v2.5.1
 
 * Make Action and WebUI Reapply restore global mounts even when the saved policy is unchanged.
