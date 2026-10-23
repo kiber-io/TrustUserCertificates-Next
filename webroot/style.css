@@ -73,6 +73,14 @@ button.choice-option { display: flex; align-items: center; justify-content: spac
 .app-name small.profile-badge { display: inline-block; background: var(--soft); color: var(--on-soft); padding: 2px 7px; border-radius: 6px; }
 .app input { width: 21px; height: 21px; margin: 0; flex-shrink: 0; accent-color: var(--accent); }
 .app-certificates { min-width: 0; border: 0; padding: 0 0 16px; margin: 0; }
+.app-hooks { min-width: 0; border: 0; border-top: 1px solid var(--line); padding: 8px 0 16px; margin: 0; }
+.hook-choice { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 56px; cursor: pointer; font-size: 13px; }
+.app input.hook-switch { appearance: none; -webkit-appearance: none; width: 52px; height: 32px; border: 2px solid var(--muted); border-radius: 18px; background: var(--line); position: relative; cursor: pointer; }
+.hook-switch::before { content: ''; position: absolute; width: 16px; height: 16px; left: 6px; top: 6px; border-radius: 50%; background: var(--muted); transition: transform .15s ease, background-color .15s ease; }
+.app input.hook-switch:checked { background: var(--accent); border-color: var(--accent); }
+.hook-switch:checked::before { width: 24px; height: 24px; left: 0; top: 2px; transform: translateX(22px); background: var(--on-accent); }
+.hook-choice:active .hook-switch { box-shadow: 0 0 0 7px var(--soft); }
+@media (prefers-reduced-motion: reduce) { .hook-switch::before { transition: none; } }
 .certificate-choice { display: flex; align-items: center; gap: 14px; cursor: pointer; padding: 12px 0; min-height: 48px; }
 .certificate-choice > span { min-width: 0; overflow-wrap: anywhere; }
 .certificate-choice .trust-mode { width: 100px; min-height: 48px; flex-shrink: 0; padding: 10px 10px; border-radius: 12px; font-size: 12px; }

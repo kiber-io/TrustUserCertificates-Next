@@ -238,6 +238,41 @@ PY
 tool drop-cert "$TMP/off-rules" "$NAME" > "$TMP/off-dropped"
 [[ ! -s "$TMP/off-dropped" ]]
 
+# Hooks are separate flags: no certificate library or user CA baseline is required.
+mkdir "$TMP/hook-custom" "$TMP/hooks"
+printf 'com.example.one @hooks ct\n10:com.example.one @hooks user\ncom.example.one @hooks ct\n' > "$TMP/hook-rules"
+printf '10:com.example.one @hooks user\ncom.example.one @hooks ct\n' > "$TMP/hook-expected"
+tool normalize "$TMP/hook-rules" "$TMP/hook-custom" "$TMP/appmap" > "$TMP/hook-normalized"
+cmp "$TMP/hook-expected" "$TMP/hook-normalized"
+tool prepare "$TMP/stock" "$TMP/stock" "$TMP/hook-rules" "$TMP/hook-custom" "$TMP/appmap" "$TMP/no-user-baseline" "$TMP/hooks"
+tool status true ready "$TMP/hook-rules" "$TMP/hook-custom" "$TMP/log" > "$TMP/hooks.json"
+python3 - "$TMP" <<'PY'
+import json, pathlib, sys
+root = pathlib.Path(sys.argv[1])
+status = json.loads((root / 'hooks.json').read_text())
+assert status['assignments'] == {} and status['globalCertificates'] == {} and status['certificates'] == []
+assert status['packages'] == ['10:com.example.one', 'com.example.one']
+assert status['hooks'] == {
+    'com.example.one': {'disableCT': True, 'trustUserCAs': False, "trustSystemCAs": False},
+    '10:com.example.one': {'disableCT': False, 'trustUserCAs': True, "trustSystemCAs": False},
+}
+assert (root / 'hooks/config').read_text() == '1010001 com.example.one\n10001 com.example.one\n'
+stock_file = next((root / 'stock').iterdir())
+for user, flag in ((0, b'\x01'), (10, b'\x02')):
+    app = root / ('hooks/apps/%s/com.example.one' % user)
+    assert (app / 'hooks').is_file() and (app / 'hooks').read_bytes() == flag
+    assert not (app / 'user').exists()
+    for store in ('system', 'apex'):
+        files = [p for p in (app / store).iterdir() if not p.name.startswith('.')]
+        assert len(files) == 1 and files[0].read_bytes() == stock_file.read_bytes()
+assert not (root / 'hooks/global/enabled').exists()
+assert not (root / 'no-user-baseline').exists()
+PY
+cp "$TMP/hook-rules" "$TMP/hook-and-cert"
+printf 'com.example.one %s\n' "$NAME" >> "$TMP/hook-and-cert"
+tool drop-cert "$TMP/hook-and-cert" "$NAME" > "$TMP/hook-dropped"
+cmp "$TMP/hook-expected" "$TMP/hook-dropped"
+
 reject_rules() {
     if tool normalize "$TMP/bad-rules" "$TMP/custom" "$TMP/appmap" > "$TMP/output" 2> "$TMP/error"; then
         echo 'FAIL: accepted invalid certificate rules' >&2
@@ -250,6 +285,9 @@ for RULE in "com.unknown.app $NAME" "com.example.one deadbeef.0" \
     "com.example.one $NAME extra" 'com.example.one' "@global ../$NAME" \
     "com.example.one $NAME System" "com.example.one $NAME user extra" \
     "com.example.one $NAME inherit" "@global $NAME off" \
+    '@global @hooks both' 'com.example.one @hooks' 'com.example.one @hooks off' \
+    'com.example.one @hooks unknown' 'com.example.one @hooks CT' 'com.example.one @hooks ct,user' \
+    'com.example.one @hooks ct extra' 'com.unknown.app @hooks ct' '10:../com.example.one @hooks ct' \
     "0:com.example.one $NAME" "01:com.example.one $NAME" "-1:com.example.one $NAME" \
     "21475:com.example.one $NAME" "9999999999999:com.example.one $NAME" \
     "11:com.example.one $NAME" "10:../com.example.one $NAME" "10:com.example.one;id $NAME"; do
@@ -260,6 +298,8 @@ for MODE in off user both; do
     printf 'com.example.one %s system\ncom.example.one %s %s\n' "$NAME" "$NAME" "$MODE" > "$TMP/bad-rules"
     reject_rules
 done
+printf 'com.example.one @hooks ct\ncom.example.one @hooks user\n' > "$TMP/bad-rules"
+reject_rules
 head -c 65537 /dev/zero > "$TMP/bad-rules"
 reject_rules
 printf '\000com.example.one %s\n' "$NAME" > "$TMP/bad-rules"

@@ -22,6 +22,35 @@ inline bool regular_uid(uint32_t uid) {
     return app_id >= 10000 && app_id <= 19999;
 }
 
+inline bool selected_response(uint8_t value) { return (value & 1) && value <= 15; }
+
+struct HookReport { uint32_t magic = kMagic; uint32_t requested = 0; uint32_t active = 0; };
+inline bool valid_hook_report(const HookReport &report, uint8_t requested) {
+    return requested >= 1 && requested <= 7 && report.magic == kMagic &&
+        report.requested == requested && (report.active & ~static_cast<uint32_t>(requested)) == 0;
+}
+
+inline bool read_hook_flags(int snapshot, uint8_t &flags) {
+    flags = 0;
+    int fd = openat(snapshot, "hooks", O_RDONLY | O_NONBLOCK | O_CLOEXEC | O_NOFOLLOW);
+    if (fd < 0) return errno == ENOENT;
+    struct stat file{};
+    bool ok = fstat(fd, &file) == 0;
+    if (ok && (!S_ISREG(file.st_mode) || file.st_size != 1)) { errno = EINVAL; ok = false; }
+    uint8_t data[2] = {};
+    ssize_t count = -1;
+    if (ok) {
+        do { count = read(fd, data, sizeof(data)); } while (count < 0 && errno == EINTR);
+        if (count >= 0 && (count != 1 || data[0] < 1 || data[0] > 7)) errno = EINVAL;
+        ok = count == 1 && data[0] >= 1 && data[0] <= 7;
+    }
+    int error = errno;
+    close(fd);
+    errno = error;
+    if (ok) flags = data[0];
+    return ok;
+}
+
 inline bool zygote_process(pid_t pid) {
     char path[64], name[32] = {};
     // Android can leave comm as "main"; argv[0] identifies the Zygote process.

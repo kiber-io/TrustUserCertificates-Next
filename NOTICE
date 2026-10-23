@@ -13,6 +13,9 @@ Further modified by kiber.io on 2026-10-19 to support User/Both injection in
 profiles with an uninitialized user CA directory, without installing CA files
 into Android's real store.
 
+Further modified by kiber.io on 2026-10-22 to add optional per-app CT, system CA and user
+CA trust hooks through Android's Network Security Configuration.
+
 The project as a whole is distributed under the GNU Affero General Public
 License, version 3. See LICENSE for the complete terms, including the
 disclaimer of warranty and the rights to modify and redistribute the work.
@@ -43,3 +46,17 @@ INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
 LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR
 OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
 PERFORMANCE OF THIS SOFTWARE.
+
+ART hook engine dependencies
+============================
+LSPlant and DexBuilder: Copyright LSPosed contributors, GNU LGPL version 3.
+Dobby: Copyright jmpews and contributors, Apache License version 2.0.
+parallel-hashmap: Copyright its respective contributors, Apache License
+version 2.0 and the included component notices retained in its license file.
+xz-embedded: Copyright its respective contributors, Zero-Clause BSD (0BSD).
+
+The pinned revisions and upstream repositories are listed in
+native/vendor/README.md in the corresponding source archive. Complete source,
+local modifications and build scripts are provided there, including what is
+needed to rebuild and relink the combined optional hook library. Runtime
+archives include the dependency license texts under licenses/.

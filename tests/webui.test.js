@@ -21,7 +21,7 @@ class Element {
   dispatchEvent(event) { this.listeners[event.type]?.(event); }
 }
 
-function setup(bridge = true, dynamicColor = '', fixtureCertificates, fixtureApps) {
+function setup(bridge = true, dynamicColor = '', fixtureCertificates, fixtureApps, fixturePolicy) {
   const elements = new Map();
   const created = [];
   const element = id => {
@@ -34,9 +34,10 @@ function setup(bridge = true, dynamicColor = '', fixtureCertificates, fixtureApp
   const hostile = '<img src=x onerror=alert(1)>';
   const certName = "a';$(touch /tmp/should-not-exist).0";
   const status = {
-    ready: true, reason: '', assignments: { 'com.first.app': { '11111111.0': 'system' } }, globalCertificates: {},
+    ready: true, reason: '', assignments: { 'com.first.app': { '11111111.0': 'system' } }, globalCertificates: {}, hooks: {},
     certificates: [{ name: '11111111.0', subject: 'Первый CA', fingerprint: 'AA:BB' }, { name: certName, subject: hostile, fingerprint: hostile }, { name: '33333333.0', subject: 'Третий CA', fingerprint: 'CC:DD' }], log: hostile,
   };
+  Object.assign(status, fixturePolicy);
   if (fixtureCertificates) status.certificates = fixtureCertificates;
   const apps = fixtureApps || [
     { package: 'com.second.app', label: 'Альфа ' + hostile, uid: 10002, userId: 0, userName: 'Personal', profile: 'personal', icon: 'https://untrusted.example/icon.png' },
@@ -51,9 +52,11 @@ function setup(bridge = true, dynamicColor = '', fixtureCertificates, fixtureApp
     if (command.includes(" 'save-policy' ")) {
       status.assignments = {};
       status.globalCertificates = {};
+      status.hooks = {};
       for (const line of argument(command, 'save-policy').split('\n').filter(Boolean)) {
         const [pkg, cert, mode = 'system'] = line.split(' ');
-        if (pkg === '@global') status.globalCertificates[cert] = mode;
+        if (cert === '@hooks') status.hooks[pkg] = { disableCT: ['ct', 'both', 'ct-system', 'all'].includes(mode), trustUserCAs: ['user', 'both', 'user-system', 'all'].includes(mode), trustSystemCAs: ['system', 'ct-system', 'user-system', 'all'].includes(mode) };
+        else if (pkg === '@global') status.globalCertificates[cert] = mode;
         else (status.assignments[pkg] ||= {})[cert] = mode;
       }
     }
@@ -104,6 +107,13 @@ const setGlobalMode = (ui, index, mode) => {
   const option = ui.element('choice-menu').children.find(option => option.value === mode);
   assert.ok(option);
   option.click();
+};
+const hookFor = (ui, key, feature) => rowFor(ui, key).children[2].children
+  .map(label => label.children[1]).find(toggle => toggle.dataset.hook === feature);
+const setHook = (ui, key, feature, checked) => {
+  const toggle = hookFor(ui, key, feature);
+  toggle.checked = checked;
+  toggle.listeners.change();
 };
 
 test('loads assignments, sorts enabled apps first, saves per-app certificates and cleans callbacks', async () => {
@@ -713,4 +723,113 @@ test('the save warning stays visible before edits, while dirty and after reverti
   setMode(ui, 'com.first.app', 0, 'system');
   assert.equal(ui.element('save').hidden, true);
   assert.equal(ui.element('selection-note').textContent, warning);
+});
+
+test('independent hook switches roundtrip through ct, both and user policies and revert dirty state', async () => {
+  const ui = setup();
+  await settle();
+  ui.element('tab-apps').listeners.click();
+  const ct = hookFor(ui, 'com.first.app', 'disableCT');
+  const user = hookFor(ui, 'com.first.app', 'trustUserCAs');
+  assert.equal(ct.checked, false);
+  assert.equal(user.checked, false);
+  assert.equal(ct.attributes.role, 'switch');
+  assert.match(ct.title, /own TLS stack may not be covered/);
+  assert.match(user.attributes['aria-description'], /user CA anchors/);
+  assert.match(user.title, /pinning, expiry and hostname checks remain/);
+  setHook(ui, 'com.first.app', 'disableCT', true);
+  assert.equal(ui.element('save').hidden, false);
+  assert.equal(hookFor(ui, 'com.first.app', 'disableCT').focused, true);
+  assert.equal(hookFor(ui, 'com.first.app', 'disableCT').attributes['aria-checked'], 'true');
+  assert.equal(hookFor(ui, 'com.first.app', 'trustUserCAs').checked, false);
+  setHook(ui, 'com.first.app', 'disableCT', false);
+  assert.equal(ui.element('save').hidden, true);
+  for (const [ctEnabled, userEnabled, systemEnabled, mode] of [[true, false, false, 'ct'], [true, true, false, 'both'], [false, true, false, 'user'], [false, false, true, 'system'], [true, false, true, 'ct-system'], [false, true, true, 'user-system'], [true, true, true, 'all']]) {
+    setHook(ui, 'com.first.app', 'disableCT', ctEnabled);
+    setHook(ui, 'com.first.app', 'trustUserCAs', userEnabled);
+    setHook(ui, 'com.first.app', 'trustSystemCAs', systemEnabled);
+    ui.element('save').listeners.click();
+    await settle();
+    assert.ok(ui.calls.some(call => call.command.endsWith(`'save-policy' 'com.first.app 11111111.0\ncom.first.app @hooks ${mode}'`)));
+    assert.deepEqual(ui.status.hooks['com.first.app'], { disableCT: ctEnabled, trustUserCAs: userEnabled, trustSystemCAs: systemEnabled });
+    assert.equal(ui.element('save').hidden, true);
+    assert.equal(hookFor(ui, 'com.first.app', 'disableCT').checked, ctEnabled);
+    assert.equal(hookFor(ui, 'com.first.app', 'trustUserCAs').checked, userEnabled);
+  }
+  setHook(ui, 'com.first.app', 'trustUserCAs', false);
+  setHook(ui, 'com.first.app', 'disableCT', false);
+  setHook(ui, 'com.first.app', 'trustSystemCAs', false);
+  ui.element('save').listeners.click();
+  await settle();
+  assert.deepEqual(ui.status.hooks, {});
+  assert.ok(ui.calls.at(-2).command.endsWith("'save-policy' 'com.first.app 11111111.0'"));
+});
+
+test('hook-only apps sort and count as configured without a certificate library', async () => {
+  const ui = setup(true, '', [], undefined, { assignments: {} });
+  await settle();
+  assert.equal(packageOf(ui.element('apps').children[0]), 'com.second.app');
+  ui.element('tab-apps').listeners.click();
+  setHook(ui, 'com.first.app', 'disableCT', true);
+  assert.equal(packageOf(ui.element('apps').children[0]), 'com.first.app');
+  assert.equal(ui.element('selected-count').textContent, '1');
+  assert.equal(rowFor(ui, 'com.first.app').open, true);
+  assert.match(rowFor(ui, 'com.first.app').children[0].children[1].children[2].textContent, /CT off/);
+  assert.equal(rowFor(ui, 'com.first.app').children[2].children.length, 3);
+  ui.element('save').listeners.click();
+  await settle();
+  assert.ok(ui.calls.some(call => call.command.endsWith("'save-policy' 'com.first.app @hooks ct'")));
+  assert.equal(ui.element('overview-apps').textContent, '1');
+  assert.deepEqual(ui.status.assignments, {});
+});
+
+test('hook flags are scoped to the full app and profile key and survive certificate deletion', async () => {
+  const ui = setup(true, '', [{ name: '11111111.0', subject: 'CN=Only CA', fingerprint: 'AA:BB' }], [
+    { package: 'com.first.app', label: 'Browser', userId: 0, profile: 'personal' },
+    { package: 'com.first.app', label: 'Browser', userId: 10, profile: 'work', userName: 'Office' },
+  ]);
+  await settle();
+  ui.element('tab-apps').listeners.click();
+  setHook(ui, 'com.first.app', 'disableCT', true);
+  assert.equal(hookFor(ui, '10:com.first.app', 'disableCT').checked, false);
+  setHook(ui, '10:com.first.app', 'trustUserCAs', true);
+  assert.equal(hookFor(ui, 'com.first.app', 'trustUserCAs').checked, false);
+  ui.element('save').listeners.click();
+  await settle();
+  assert.ok(ui.calls.some(call => call.command.endsWith("'save-policy' '10:com.first.app @hooks user\ncom.first.app 11111111.0\ncom.first.app @hooks ct'")));
+  assert.equal(ui.element('overview-apps').textContent, '2');
+  setHook(ui, '10:com.first.app', 'disableCT', true);
+  ui.element('certificates').children[0].children[2].click();
+  await settle();
+  assert.equal(ui.status.certificates.length, 0);
+  assert.deepEqual(ui.status.assignments, {});
+  assert.deepEqual(ui.status.hooks, {
+    '10:com.first.app': { disableCT: false, trustUserCAs: true, trustSystemCAs: false },
+    'com.first.app': { disableCT: true, trustUserCAs: false, trustSystemCAs: false },
+  });
+  assert.equal(hookFor(ui, '10:com.first.app', 'disableCT').checked, true, 'Unsaved hook edit survives a certificate mutation');
+  assert.equal(hookFor(ui, 'com.first.app', 'disableCT').checked, true);
+  assert.equal(ui.element('selected-count').textContent, '2');
+  assert.equal(ui.element('save').hidden, false);
+  ui.element('save').listeners.click();
+  await settle();
+  assert.equal(ui.status.hooks['10:com.first.app'].disableCT, true);
+});
+
+test('hostile hook keys remain inert text and strict boolean flags do not enable extra hooks', async () => {
+  const hostileKey = "com.<img src=x onerror=alert(1)>.'$(touch /tmp/no-command)'";
+  const hooks = JSON.parse('{"__proto__":{"disableCT":true,"trustUserCAs":false}}');
+  hooks[hostileKey] = { disableCT: false, trustUserCAs: true, trustSystemCAs: false };
+  hooks['com.disabled.app'] = { disableCT: false, trustUserCAs: 'true' };
+  const ui = setup(true, '', [], [], { assignments: {}, hooks });
+  await settle();
+  assert.equal(ui.element('selected-count').textContent, '2');
+  assert.equal(hookFor(ui, '__proto__', 'disableCT').checked, true);
+  const row = rowFor(ui, hostileKey);
+  assert.equal(row.children[0].children[1].children[0].textContent, hostileKey);
+  assert.equal(row.children[0].children[1].children[0].children.length, 0);
+  assert.equal(row.dataset.appKey, hostileKey);
+  assert.equal(hookFor(ui, hostileKey, 'trustUserCAs').checked, true);
+  assert.equal({}.disableCT, undefined);
+  assert.equal(rowFor(ui, 'com.disabled.app'), undefined);
 });

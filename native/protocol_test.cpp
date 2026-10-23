@@ -8,6 +8,59 @@
 #include <stdlib.h>
 #include <limits.h>
 
+static void hook_policy_check() {
+    char directory[PATH_MAX];
+    const char *temporary = getenv("TMPDIR");
+    int length = snprintf(directory, sizeof(directory), "%s/trustusercerts-hooks-XXXXXX", temporary ? temporary : "/tmp");
+    assert(length > 0 && length < static_cast<int>(sizeof(directory)) && mkdtemp(directory));
+    int snapshot = open(directory, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    assert(snapshot >= 0);
+    uint8_t flags = 255;
+    assert(tuc::read_hook_flags(snapshot, flags) && flags == 0);
+    int file = openat(snapshot, "hooks", O_CREAT | O_RDWR | O_EXCL | O_CLOEXEC, 0600);
+    assert(file >= 0);
+    assert(!tuc::read_hook_flags(snapshot, flags) && flags == 0);
+    for (uint8_t value = 0; value <= 8; ++value) {
+        assert(pwrite(file, &value, 1, 0) == 1);
+        bool valid = value >= 1 && value <= 7;
+        assert(tuc::read_hook_flags(snapshot, flags) == valid);
+        assert(flags == (valid ? value : 0));
+    }
+    const uint8_t extra[] = {1, 2};
+    assert(pwrite(file, extra, sizeof(extra), 0) == sizeof(extra));
+    assert(!tuc::read_hook_flags(snapshot, flags) && flags == 0);
+    close(file);
+    assert(unlinkat(snapshot, "hooks", 0) == 0);
+    assert(mkdirat(snapshot, "hooks", 0700) == 0);
+    assert(!tuc::read_hook_flags(snapshot, flags) && flags == 0);
+    assert(unlinkat(snapshot, "hooks", AT_REMOVEDIR) == 0);
+    assert(mkfifoat(snapshot, "hooks", 0600) == 0);
+    assert(!tuc::read_hook_flags(snapshot, flags) && flags == 0);
+    assert(unlinkat(snapshot, "hooks", 0) == 0);
+    file = openat(snapshot, "policy", O_CREAT | O_WRONLY | O_EXCL | O_CLOEXEC, 0600);
+    assert(file >= 0 && write(file, extra, 1) == 1);
+    close(file);
+    assert(symlinkat("policy", snapshot, "hooks") == 0);
+    assert(!tuc::read_hook_flags(snapshot, flags) && flags == 0);
+    assert(unlinkat(snapshot, "hooks", 0) == 0 && unlinkat(snapshot, "policy", 0) == 0);
+    for (unsigned value = 0; value <= 255; ++value)
+        assert(tuc::selected_response(value) == ((value & 1) && value <= 15));
+    for (uint8_t requested = 0; requested <= 8; ++requested) {
+        for (uint32_t active = 0; active <= 15; ++active) {
+            tuc::HookReport report{tuc::kMagic, requested, active};
+            assert(tuc::valid_hook_report(report, requested) ==
+                (requested >= 1 && requested <= 7 && (active & ~static_cast<uint32_t>(requested)) == 0));
+            report.magic = 0;
+            assert(!tuc::valid_hook_report(report, requested));
+            report.magic = tuc::kMagic;
+            ++report.requested;
+            assert(!tuc::valid_hook_report(report, requested));
+        }
+    }
+    close(snapshot);
+    assert(rmdir(directory) == 0);
+}
+
 static void snapshot_selection_check() {
     char directory[PATH_MAX];
     const char *temporary = getenv("TMPDIR");
@@ -170,4 +223,5 @@ int main(int argc, char **argv) {
     assert(!allowed(config, request));
     fclose(config);
     snapshot_selection_check();
+    hook_policy_check();
 }

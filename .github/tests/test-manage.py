@@ -201,6 +201,7 @@ apply_global() {
         self.assertFalse(status["ready"])
         self.assertEqual(status["packages"], [])
         self.assertEqual(status["assignments"], {})
+        self.assertEqual(status["hooks"], {})
         self.assertEqual(status["globalCertificates"], {})
         self.assertEqual(status["certificates"], [])
         self.run_manage("prepare")
@@ -234,6 +235,68 @@ apply_global() {
         self.assertEqual(self.status()["assignments"], {})
         self.assertEqual(self.ca_names(self.runtime / "current/global/system"), {self.certificates[0][0]})
         self.assertEqual(self.global_calls.read_text(), "")
+
+    def test_system_hook_combinations_roundtrip(self):
+        for bits, mode in enumerate(("ct", "user", "both", "system", "ct-system", "user-system", "all"), 1):
+            self.policy("com.first.app @hooks " + mode)
+            self.assertEqual((self.runtime / "current/apps/0/com.first.app/hooks").read_bytes(), bytes([bits]))
+            self.assertEqual(self.status()["hooks"]["com.first.app"], {
+                "disableCT": bool(bits & 1), "trustUserCAs": bool(bits & 2), "trustSystemCAs": bool(bits & 4),
+            })
+            self.assertEqual((self.state / "settings/rules").read_text(), "com.first.app @hooks " + mode + "\n")
+
+    def test_hook_only_policy_has_flags_without_certificates_or_user_store_mounts(self):
+        self.policy("com.first.app @hooks ct", "com.first.app @hooks ct")
+        current = self.runtime / "current"
+        status = self.status()
+        self.assertEqual(status["certificates"], [])
+        self.assertEqual(status["assignments"], {})
+        self.assertEqual(status["packages"], ["com.first.app"])
+        self.assertEqual(status["hooks"], {"com.first.app": {"disableCT": True, "trustUserCAs": False, "trustSystemCAs": False}})
+        self.assertEqual((current / "config").read_text(), "10001 com.first.app\n")
+        self.assertEqual((current / "apps/0/com.first.app/hooks").read_bytes(), b"\x01")
+        self.assertFalse((current / "global/enabled").exists())
+        self.assertEqual((self.state / "settings/rules").read_text(), "com.first.app @hooks ct\n")
+        self.assertEqual((self.root / "stops-profiles").read_text().splitlines(), ["0:com.first.app"])
+        self.env["MULTI_USER"] = "1"
+        self.policy("com.first.app @hooks both", "10:com.first.app @hooks user")
+        self.assertEqual((current / "apps/0/com.first.app/hooks").read_bytes(), b"\x03")
+        self.assertEqual((current / "apps/10/com.first.app/hooks").read_bytes(), b"\x02")
+        self.assertEqual((current / "config").read_text(), "1010001 com.first.app\n10001 com.first.app\n")
+        self.assertEqual(self.status()["hooks"], {
+            "com.first.app": {"disableCT": True, "trustUserCAs": True, "trustSystemCAs": False},
+            "10:com.first.app": {"disableCT": False, "trustUserCAs": True, "trustSystemCAs": False},
+        })
+        self.assertFalse((current / "global/user").exists())
+        for user in (0, 10):
+            app = current / ("apps/%s/com.first.app" % user)
+            self.assertFalse((app / "user").exists(), "Hook bits must not become CA selection bits")
+            for store in ("system", "apex"):
+                self.assertEqual(self.ca_names(app / store), {self.certificates[0][0]})
+        self.assertEqual(list(self.user_base.iterdir()), [], "Hook-only setup needs no user CA baseline")
+        self.import_ca()
+        first = self.certificates[1][0]
+        self.policy("com.first.app @hooks both", "com.first.app " + first,
+                    "10:com.first.app @hooks user", "@global " + first)
+        self.assertEqual(self.ca_names(current / "apps/0/com.first.app/system"), {self.certificates[0][0], first})
+        self.assertEqual(self.ca_names(current / "apps/10/com.first.app/system"), {self.certificates[0][0], first})
+        self.assertFalse((current / "apps/10/com.first.app/user").exists())
+        self.run_manage("remove-cert", first)
+        self.assertEqual(self.status()["certificates"], [])
+        self.assertEqual(self.status()["assignments"], {})
+        self.assertEqual(self.status()["globalCertificates"], {})
+        self.assertEqual((current / "apps/0/com.first.app/hooks").read_bytes(), b"\x03")
+        self.assertEqual((current / "apps/10/com.first.app/hooks").read_bytes(), b"\x02")
+        self.assertEqual((current / "config").read_text(), "1010001 com.first.app\n10001 com.first.app\n")
+        self.assertEqual((self.state / "settings/rules").read_text(),
+                         "10:com.first.app @hooks user\ncom.first.app @hooks both\n")
+        self.stops.write_text("")
+        self.policy()
+        self.assertEqual(self.status()["hooks"], {})
+        self.assertEqual(self.status()["packages"], [])
+        self.assertEqual((current / "config").read_text(), "")
+        self.assertFalse((current / "apps").exists())
+        self.assertEqual(self.stops.read_text().splitlines(), ["com.first.app", "com.first.app"])
 
     def test_work_profile_same_package_has_independent_grants_and_targeted_restart(self):
         self.env["MULTI_USER"] = "1"
@@ -302,6 +365,16 @@ apply_global() {
                      ("save-policy", "com.first.app " + first + " inherit"),
                      ("save-policy", "com.first.app " + first + " off\ncom.first.app " + first),
                      ("save-policy", "com.first.app " + first + " system\ncom.first.app " + first + " user"),
+                     ("save-policy", "@global @hooks both"),
+                     ("save-policy", "com.first.app @hooks"),
+                     ("save-policy", "com.first.app @hooks off"),
+                     ("save-policy", "com.first.app @hooks unknown"),
+                     ("save-policy", "com.first.app @hooks ct,user"),
+                     ("save-policy", "com.first.app @hooks ct extra"),
+                     ("save-policy", "com.first.app @hooks ct\ncom.first.app @hooks user"),
+                     ("save-policy", "com.not.installed @hooks ct"),
+                     ("save-policy", "0:com.first.app @hooks ct"),
+                     ("save-policy", "com.first.app @unknown ct"),
                      ("import-cert", "Z2FyYmFnZQ=="),
                      ("remove-cert", "../../module.prop"),
                      ("remove-cert", self.certificates[1][0] + "\ninvalid"),

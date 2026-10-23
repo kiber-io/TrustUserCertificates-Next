@@ -46,11 +46,12 @@ jobs:
           java-version: '17'
       - name: Set up Android build tools
         run: |
-          sdkmanager 'ndk;29.0.13113456' 'build-tools;35.0.0' 'platforms;android-35'
+          sdkmanager 'ndk;29.0.13113456' 'build-tools;35.0.0' 'platforms;android-35' 'cmake;3.31.0'
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/29.0.13113456" >> "$GITHUB_ENV"
       - name: Check certificate handling, WebUI and backend
         run: |
           bash .github/tests/test-certificates.sh
+          bash .github/tests/test-hooks.sh
           node tests/webui.test.js
           python3 .github/tests/test-manage.py
           c++ -std=c++17 -Wall -Wextra -Werror native/protocol_test.cpp -o /tmp/tuc-protocol-test

@@ -30,6 +30,8 @@ int main(int argc, char **argv) {
         fprintf(stderr, "No selected package or enabled global snapshot (errno=%d).\n", errno);
         return 1;
     }
+    uint8_t hook_flags = 0;
+    if (!tuc::read_hook_flags(app_snapshot, hook_flags)) { perror("hook policy"); return 1; }
     int sources[3] = {
         openat(app_snapshot, "system", O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW),
         openat(app_snapshot, "apex", O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW),
@@ -71,7 +73,7 @@ int main(int argc, char **argv) {
         uint8_t hello = 0, selected_ack = 0;
         if (!transfer(sockets[1], &hello, 1, false) || hello != 1 ||
             !send_request(sockets[1], request, ready_pipe[0], ack_fd) ||
-            !transfer(sockets[1], &selected_ack, 1, false) || selected_ack != 1) _exit(3);
+            !transfer(sockets[1], &selected_ack, 1, false) || !tuc::selected_response(selected_ack) || (selected_ack >> 1) != hook_flags) _exit(3);
         close(ready_pipe[0]); close(ack_fd);
         Ready ready{Applied, 0};
         if (unshare(CLONE_NEWNS) != 0) ready = {Unshare, errno};
@@ -116,7 +118,7 @@ int main(int argc, char **argv) {
     void *memory = authenticated ? mmap(nullptr, kAckSize, PROT_READ | PROT_WRITE, MAP_SHARED, channels[1], 0) : MAP_FAILED;
     if (channels[1] >= 0) close(channels[1]);
     authenticated = authenticated && memory != MAP_FAILED;
-    uint8_t selected_ack = authenticated;
+    uint8_t selected_ack = authenticated ? 1 | (hook_flags << 1) : 0;
     (void)transfer(sockets[0], &selected_ack, 1, true);
     Ready ready{};
     Result result{ReadyReceive, 0};

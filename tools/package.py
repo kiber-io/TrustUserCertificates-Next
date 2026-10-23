@@ -16,13 +16,25 @@ with zipfile.ZipFile(output, 'w', zipfile.ZIP_DEFLATED) as archive:
             if path.is_file() and 'app-icons' not in path.relative_to(root).parts:
                 archive.write(path, path.relative_to(root))
     archive.write(build / 'cert-tool.jar', 'cert-tool.jar')
+    archive.write(build / 'hooks.dex', 'hooks.dex')
     archive.write(root / 'LICENSE', 'webroot/license.txt')
     archive.write(root / 'NOTICE', 'webroot/notice.txt')
     for abi in ('arm64-v8a', 'armeabi-v7a', 'x86_64', 'x86'):
         archive.write(build / 'libs' / abi / 'libtrustusercerts.so', f'zygisk/{abi}.so')
+        archive.write(build / 'hooks' / abi / 'package' / 'libtuc-hooks.so', f'hooks/{abi}.so')
+    for name, path in {
+        'LSPlant': 'native/vendor/lsplant/LICENSE',
+        'DexBuilder': 'native/vendor/lsplant/lsplant/src/main/jni/external/dex_builder/LICENSE',
+        'parallel-hashmap': 'native/vendor/lsplant/lsplant/src/main/jni/external/dex_builder/external/parallel_hashmap/LICENSE',
+        'Dobby': 'native/vendor/dobby/LICENSE',
+        'xz-embedded': 'native/vendor/xz-embedded/COPYING',
+        'GPL-3.0': 'native/vendor/GPL-3.0.txt',
+    }.items():
+        archive.write(root / path, f'licenses/{name}.txt')
 with zipfile.ZipFile(output) as archive:
     assert archive.testzip() is None
     assert len([name for name in archive.namelist() if name.startswith('zygisk/')]) == 4
+    assert len([name for name in archive.namelist() if name.startswith('hooks/')]) == 4
 print(output)
 source = root / '.artifacts' / f'tuc-next-{version}-source.zip'
 with zipfile.ZipFile(source, 'w', zipfile.ZIP_DEFLATED) as archive:
@@ -31,7 +43,7 @@ with zipfile.ZipFile(source, 'w', zipfile.ZIP_DEFLATED) as archive:
         archive.write(root / name, name)
     for directory in ('.github', 'META-INF', 'native', 'tools', 'tests', 'webroot'):
         for path in sorted((root / directory).rglob('*')):
-            if path.is_file() and not {'app-icons', '__pycache__'}.intersection(path.relative_to(root).parts):
+            if path.is_file() and not {'app-icons', '__pycache__', '.git'}.intersection(path.relative_to(root).parts):
                 archive.write(path, path.relative_to(root))
 with zipfile.ZipFile(source) as archive:
     assert archive.testzip() is None

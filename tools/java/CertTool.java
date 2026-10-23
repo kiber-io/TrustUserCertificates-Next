@@ -25,6 +25,7 @@ import java.util.regex.Pattern;
 /** Certificate validation and Android trust-store filenames; invoked through app_process. */
 public final class CertTool {
     private static final int LIMIT = 65536;
+    private static final String HOOKS = "@hooks";
     private static final Pattern NAME = Pattern.compile("[0-9a-f]{8}\\.[0-9]+");
     private static final Pattern PACKAGE = Pattern.compile("[A-Za-z0-9_]+(\\.[A-Za-z0-9_]+)+");
     private static final Pattern PEM = Pattern.compile(
@@ -71,23 +72,37 @@ public final class CertTool {
                     if (rule.getKey().equals("@global")) continue;
                     Map<String, Integer> selected = new TreeMap<>(global);
                     selected.putAll(rule.getValue());
+                    Integer hooks = selected.remove(HOOKS);
                     int uid = apps.get(rule.getKey());
                     String packageName = packageName(rule.getKey());
-                    prepareStores(new File(dest, "apps/" + (uid / 100000) + "/" + packageName), stock, apex, custom,
+                    File app = new File(dest, "apps/" + (uid / 100000) + "/" + packageName);
+                    prepareStores(app, stock, apex, custom,
                         selected, userBase, new TreeSet<>(Arrays.asList(uid / 100000)), ".trustusercerts-app");
+                    if (hooks != null) write(new File(app, "hooks"), new byte[] {hooks.byteValue()});
                     config.append(uid).append(' ').append(packageName).append('\n');
                 }
                 write(new File(dest, "config"), config.toString().getBytes(StandardCharsets.UTF_8));
             } else if (args.length == 6 && args[0].equals("status")) {
                 StringBuilder packages = new StringBuilder("[");
                 StringBuilder assignments = new StringBuilder("{");
+                StringBuilder hooks = new StringBuilder("{");
                 Map<String, Map<String, Integer>> rules = rules(new File(args[3]));
                 for (Map.Entry<String, Map<String, Integer>> rule : rules.entrySet()) {
                     if (rule.getKey().equals("@global")) continue;
                     if (packages.length() > 1) packages.append(',');
-                    if (assignments.length() > 1) assignments.append(',');
                     packages.append(quote(rule.getKey()));
-                    assignments.append(quote(rule.getKey())).append(':').append(jsonModes(rule.getValue()));
+                    String certs = jsonModes(rule.getValue());
+                    if (!certs.equals("{}")) {
+                        if (assignments.length() > 1) assignments.append(',');
+                        assignments.append(quote(rule.getKey())).append(':').append(certs);
+                    }
+                    Integer flags = rule.getValue().get(HOOKS);
+                    if (flags != null) {
+                        if (hooks.length() > 1) hooks.append(',');
+                        hooks.append(quote(rule.getKey())).append(":{\"disableCT\":")
+                            .append((flags & 1) != 0).append(",\"trustUserCAs\":").append((flags & 2) != 0)
+                            .append(",\"trustSystemCAs\":").append((flags & 4) != 0).append('}');
+                    }
                 }
                 String log = "";
                 if (new File(args[5]).isFile()) try (RandomAccessFile file = new RandomAccessFile(args[5], "r")) {
@@ -99,6 +114,7 @@ public final class CertTool {
                 System.out.println("{\"ready\":" + args[1].equals("true") + ",\"reason\":" + quote(args[2]) +
                     ",\"packages\":" + packages.append(']') + ",\"certificates\":" + list(directory(args[4])) +
                     ",\"assignments\":" + assignments.append('}') +
+                    ",\"hooks\":" + hooks.append('}') +
                     ",\"globalCertificates\":" + jsonModes(rules.get("@global")) +
                     ",\"log\":" + quote(log) + "}");
             } else if (args.length == 4 && args[0].equals("merge")) {
@@ -128,15 +144,21 @@ public final class CertTool {
             String[] parts = line.trim().split("[ \\t]+");
             if ((parts.length != 2 && parts.length != 3) ||
                 (!parts[0].equals("@global") && !validKey(parts[0])) ||
-                !NAME.matcher(parts[1]).matches()) throw new IllegalArgumentException("Invalid certificate rule: " + line);
-            int mode = parts.length == 2 ? 1 : mode(parts[2]);
+                (!NAME.matcher(parts[1]).matches() && !parts[1].equals(HOOKS))) {
+                throw new IllegalArgumentException("Invalid certificate rule: " + line);
+            }
+            boolean hook = parts[1].equals(HOOKS);
+            if (hook && (parts.length != 3 || parts[0].equals("@global"))) {
+                throw new IllegalArgumentException("Hooks require an app and explicit flags");
+            }
+            int mode = hook ? hookMode(parts[2]) : parts.length == 2 ? 1 : mode(parts[2]);
             if (parts[0].equals("@global") && mode == 0) {
                 throw new IllegalArgumentException("Global Off is represented by removing the rule");
             }
             if (!rules.containsKey(parts[0])) rules.put(parts[0], new TreeMap<>());
             Integer previous = rules.get(parts[0]).put(parts[1], mode);
             if (previous != null && previous != mode) {
-                throw new IllegalArgumentException("Conflicting certificate modes for " + parts[0] + ": " + parts[1]);
+                throw new IllegalArgumentException("Conflicting rule modes for " + parts[0] + ": " + parts[1]);
             }
         }
         return rules;
@@ -183,7 +205,9 @@ public final class CertTool {
             if (!rule.getKey().equals("@global") && !apps.containsKey(rule.getKey())) {
                 throw new IllegalArgumentException("Package is not installed for the selected user: " + rule.getKey());
             }
-            for (String name : rule.getValue().keySet()) if (checked.add(name)) parse(read(new File(custom, name)), true);
+            for (String name : rule.getValue().keySet()) {
+                if (!name.equals(HOOKS) && checked.add(name)) parse(read(new File(custom, name)), true);
+            }
         }
     }
 
@@ -195,6 +219,21 @@ public final class CertTool {
         throw new IllegalArgumentException("Invalid certificate mode: " + value);
     }
 
+    private static int hookMode(String value) {
+        if (value.equals("ct")) return 1;
+        if (value.equals("user")) return 2;
+        if (value.equals("both")) return 3;
+        if (value.equals("system")) return 4;
+        if (value.equals("ct-system")) return 5;
+        if (value.equals("user-system")) return 6;
+        if (value.equals("all")) return 7;
+        throw new IllegalArgumentException("Invalid hook flags: " + value);
+    }
+
+    private static String hookModeName(int flags) {
+        return new String[]{"", "ct", "user", "both", "system", "ct-system", "user-system", "all"}[flags];
+    }
+
     private static String modeName(int mode) {
         return mode == 0 ? "off" : mode == 1 ? "system" : mode == 2 ? "user" : "both";
     }
@@ -204,7 +243,8 @@ public final class CertTool {
         for (Map.Entry<String, Map<String, Integer>> rule : rules.entrySet()) {
             for (Map.Entry<String, Integer> cert : rule.getValue().entrySet()) {
                 text.append(rule.getKey()).append(' ').append(cert.getKey());
-                if (cert.getValue() != 1) text.append(' ').append(modeName(cert.getValue()));
+                if (cert.getKey().equals(HOOKS)) text.append(' ').append(hookModeName(cert.getValue()));
+                else if (cert.getValue() != 1) text.append(' ').append(modeName(cert.getValue()));
                 text.append('\n');
             }
         }
@@ -214,6 +254,7 @@ public final class CertTool {
     private static String jsonModes(Map<String, Integer> modes) {
         StringBuilder json = new StringBuilder("{");
         if (modes != null) for (Map.Entry<String, Integer> cert : modes.entrySet()) {
+            if (cert.getKey().equals(HOOKS)) continue;
             if (json.length() > 1) json.append(',');
             json.append(quote(cert.getKey())).append(':').append(quote(modeName(cert.getValue())));
         }

@@ -1,3 +1,10 @@
+# v2.6
+
+* Add independent Disable CT, Trust system CAs and Trust user CAs switches for each app and Android profile.
+* Keep existing certificate and pinning validation when adding user CA trust through Android's network security configuration.
+* Load the ART hook engine only in processes with explicitly enabled hooks.
+* Cover compiled XML security configuration parsing so installed hooks change the app's actual trust policy.
+
 # v2.5.2
 
 * Support global and per-app User/Both injection in profiles whose user CA directory has not been initialized.

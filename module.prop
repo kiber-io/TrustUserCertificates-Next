@@ -1,8 +1,8 @@
 id=trustusercerts
 name=TUC Next
-version=v2.5.2
-versionCode=2502
+version=v2.6
+versionCode=2600
 author=lupohan44, kiber.io
-description=Per-app and global CA injection as System, User or Both, configured through KernelSU WebUI. Requires Zygisk.
+description=Per-app and global CA injection with optional CT, system CA and user CA trust hooks, configured through KernelSU WebUI. Requires Zygisk.
 minMagisk=26000
 updateJson=https://github.com/kiber-io/TrustUserCertificates-Next/releases/latest/download/update.json

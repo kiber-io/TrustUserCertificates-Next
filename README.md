@@ -47,10 +47,52 @@ Individually configured apps sort first, including apps with explicit Off rules.
 A floating Save button appears only while policy edits are pending. The interface
 uses KernelSU's dynamic palette when available, with light/dark fallbacks.
 
+## Optional app hooks
+
+A standalone [TUC Hook Probe APK](tests/hook-probe/README.md) can show the actual
+CT policy and CA sources in a test app that initially excludes system/user CAs.
+It also provides a manual HTTPS check and a copyable config report.
+
+Expand an app in **Apps** to enable these options independently, then save:
+
+| Option | Effect |
+| --- | --- |
+| Disable CT | Disable Android Network Security Configuration's Certificate Transparency requirement for this app. CT controls are available on Android 16+. |
+| Trust system CAs | Add Android's system CA source even if the app excludes it, including CAs privately injected in System mode. |
+| Trust user CAs | Add the selected profile's Android user CA source to the app's network security configuration, including CAs privately injected in User mode. |
+
+All options are off by default and independent for each profile. They work without
+editing or re-signing the APK, and can be saved even with an empty module certificate
+library. Trust user CAs also permits CAs already installed in that profile's Android
+user store; it does not automatically assign CAs from the module library.
+
+The trust hook preserves the app's existing system and embedded CA sources and
+certificate pins. It does not accept arbitrary certificates or disable expiry,
+signature or hostname checks. Android normally exempts user CA sources from implicit
+CT requirements; explicitly required CT remains enabled unless Disable CT is selected.
+Disabling CT removes the requirement for evidence of public certificate logging.
+
+These hooks affect Android's network security configuration. Apps with independent
+trust managers, native TLS implementations, Chromium/WebView or Cronet can enforce
+their own policies. An enabled switch is not proof that every connection uses the
+platform verifier; check the process hook result in Diagnostics.
+
+The engine also deoptimizes Android's compiled XML configuration parser, so
+inlined Builder calls cannot silently bypass the hook. On a Pixel 7 running
+Android 16, the probe's real XML config was verified with all three hooks enabled:
+CT disabled, system/user sources added, and the embedded CA preserved. An HTTPS
+request then completed with HTTP 200. Android 17 and other OEM builds still need
+device verification; this check does not independently prove proxy capture.
+
+The optional ART hook engine is loaded only in selected app processes and remains
+there while they run. Apps without hooks keep the existing mount-only path. This
+feature changes native libraries: fully reboot after installing the update, then
+restore temporary root if applicable, so the Zygisk provider loads the new code.
+
 ## Install and configure
 
 1. Install a Zygisk provider if using KernelSU, and activate it.
-2. Install the **built** `tuc-next-v2.5.2.zip` in KernelSU.
+2. Install the **built** `tuc-next-v2.6.zip` in KernelSU.
    A ZIP of the repository source is not installable: it lacks compiled libraries
    and the certificate helper.
 3. Activate the module, then open its **WebUI** in KernelSU.
@@ -194,8 +236,9 @@ loading the module to remove them.
 
 ## Build and checks
 
-In a WSL Ubuntu shell with an existing JDK 17+, Android SDK platform 35, build-tools 35.0.0 and
-NDK 29.0.13113456, set `JAVA_HOME`, `ANDROID_HOME` and `ANDROID_NDK_HOME`, then run:
+In a WSL Ubuntu shell with an existing JDK 17+, Android SDK platform 35, build-tools
+35.0.0, NDK 29.0.13113456, SDK CMake 3.31.0 and Ninja 1.11+, set `JAVA_HOME`,
+`ANDROID_HOME` and `ANDROID_NDK_HOME`, then run:
 
 ```sh
 bash tools/build.sh
@@ -210,6 +253,7 @@ Host checks (Java, OpenSSL, Node, Python and a C++ compiler):
 
 ```sh
 bash .github/tests/test-certificates.sh
+bash .github/tests/test-hooks.sh
 node tests/webui.test.js
 python3 .github/tests/test-manage.py
 c++ -std=c++17 native/protocol_test.cpp -o /tmp/tuc-protocol-test
@@ -247,7 +291,9 @@ Each binary release must be accompanied by its matching `tuc-next-VERSION-source
 at the same release download location, at no additional charge. Publish the code
 used to build the release; a link to an unrelated or older revision is insufficient.
 
-See [NOTICE](NOTICE) for attribution and the separate permissive license of the
-Zygisk API header. The original project's README also credits
+See [NOTICE](NOTICE) for attribution and the separate licenses of the Zygisk API
+header and ART hook dependencies. Their full source is included in the source
+archive, and their license texts are included in the installable archive.
+The original project's README also credits
 [HTTP Toolkit](https://httptoolkit.com/blog/android-14-install-system-ca-certificate/)
 for its main certificate injection logic.

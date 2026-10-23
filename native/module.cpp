@@ -4,6 +4,9 @@
 #include "protocol.hpp"
 
 #include <errno.h>
+#include <android/dlext.h>
+#include <android/log.h>
+#include <dlfcn.h>
 #include <fcntl.h>
 #include <limits.h>
 #include <linux/memfd.h>
@@ -38,6 +41,7 @@ enum Phase : uint32_t {
     PropagationPrivate, ApexTarget, SystemTarget, SystemBind, ApexBind,
     SystemReadonly, ApexReadonly, AppSnapshot, PipeDescriptors, AckMap,
     UserSource, UserTarget, UserBind, UserReadonly,
+    HookPolicy,
 };
 struct Result { uint32_t phase; int32_t error; };
 struct Ready { uint32_t phase; int32_t error; };
@@ -48,7 +52,7 @@ const char *phase_name(uint32_t phase) {
         "system-source", "apex-source", "worker-pipe", "worker-fork", "worker-timeout", "worker-reply",
         "namespace-setns", "propagation-private", "apex-target", "system-target", "system-bind",
         "apex-bind", "system-readonly", "apex-readonly", "snapshot-select", "pipe-descriptors", "ack-map",
-        "user-source", "user-target", "user-bind", "user-readonly"};
+        "user-source", "user-target", "user-bind", "user-readonly", "hook-policy"};
     return phase < sizeof(names) / sizeof(names[0]) ? names[phase] : "unknown";
 }
 
@@ -431,6 +435,12 @@ void companion(int client) {
     int app_snapshot = snapshot < 0 ? -1 : tuc::open_effective_snapshot(snapshot, request);
     uint8_t selected = app_snapshot >= 0;
     if (!selected && errno != ENOENT) log_phase(peer.pid, request.package, {AppSnapshot, errno});
+    uint8_t hook_flags = 0;
+    if (selected && !tuc::read_hook_flags(app_snapshot, hook_flags)) {
+        log_phase(peer.pid, request.package, {HookPolicy, errno});
+        selected = 0;
+    }
+    if (selected) selected |= hook_flags << 1;
     if (snapshot >= 0) close(snapshot);
     if (!transfer(client, &selected, 1, true) || !selected) {
         if (app_snapshot >= 0) close(app_snapshot);
@@ -456,17 +466,33 @@ void companion(int client) {
         snprintf(detail, sizeof(detail), "expected_uid=%u observed_uid=%u parent=%d expected_parent=%d",
                  request.uid, uid, final_parent, parent);
     }
-    close(app_snapshot); close(process); close(channels[0]);
+    close(app_snapshot); close(process);
     log_phase(peer.pid, request.package, outcome, detail);
     __atomic_store_n(acknowledgement, outcome.phase == Applied ? 1u : 2u, __ATOMIC_RELEASE);
     munmap(memory, kAckSize);
+    if (hook_flags && outcome.phase == Applied) {
+        tuc::HookReport report;
+        bool received = read_pipe(channels[0], &report, sizeof(report));
+        char message[160];
+        if (received && tuc::valid_hook_report(report, hook_flags)) {
+            snprintf(message, sizeof(message), "hooks requested=%u active=%u", hook_flags, report.active);
+        } else {
+            snprintf(message, sizeof(message), "hooks requested=%u result unavailable errno=%d", hook_flags, received ? EPROTO : errno);
+        }
+        log_result(peer.pid, request.package, message);
+    }
+    close(channels[0]);
 }
 
 class Module : public zygisk::ModuleBase {
 public:
     void onLoad(zygisk::Api *api, JNIEnv *env) override { api_ = api; env_ = env; }
     void preAppSpecialize(zygisk::AppSpecializeArgs *args) override {
-        api_->setOption(zygisk::DLCLOSE_MODULE_LIBRARY);
+        struct Unload {
+            zygisk::Api *api;
+            bool retain = false;
+            ~Unload() { if (!retain) api->setOption(zygisk::DLCLOSE_MODULE_LIBRARY); }
+        } unload{api_};
         if (!tuc::regular_uid(args->uid) || !args->app_data_dir ||
             (args->is_child_zygote && *args->is_child_zygote)) return;
         tuc::Request request;
@@ -492,7 +518,7 @@ public:
         uint8_t selected = 0, hello = 0;
         bool ok = transfer(fd, &hello, 1, false) && hello == 1 &&
                   send_request(fd, request, ready_pipe[0], ack_fd) &&
-                  transfer(fd, &selected, 1, false) && selected == 1;
+                  transfer(fd, &selected, 1, false) && tuc::selected_response(selected);
         close(ready_pipe[0]); close(ack_fd); close(fd);
         if (!ok) { close(ready_pipe[1]); munmap(acknowledgement, kAckSize); return; }
         Ready failure{};
@@ -506,16 +532,93 @@ public:
         }
         ready_ = ready_pipe[1];
         acknowledgement_ = acknowledgement;
+        hook_flags_ = selected >> 1;
+        if (hook_flags_) {
+            uid_ = request.uid;
+            memcpy(package_, request.package, sizeof(package_));
+            preload_hooks();
+            unload.retain = true;
+        }
     }
     void postAppSpecialize(const zygisk::AppSpecializeArgs *) override {
         if (ready_ < 0) return;
         Ready ready{Applied, 0};
-        if (write_pipe(ready_, &ready, sizeof(ready))) (void)wait_ack(acknowledgement_);
-        close(ready_); munmap(acknowledgement_, kAckSize);
-        ready_ = -1;
+        uint32_t applied = write_pipe(ready_, &ready, sizeof(ready)) ? wait_ack(acknowledgement_) : 0;
+        int error = errno;
+        munmap(acknowledgement_, kAckSize);
         acknowledgement_ = nullptr;
+        if (hook_flags_) {
+            int active = 0;
+            if (applied == 1 && getuid() == uid_ && geteuid() == uid_ && install_)
+                active = install_(env_, dex_, dex_size_, hook_flags_);
+            if (active < 0 || (active & ~hook_flags_)) active = 0;
+            char message[160];
+            snprintf(message, sizeof(message), "hooks requested=%u active=%d mount_ack=%u errno=%d", hook_flags_, active, applied, applied ? 0 : error);
+            __android_log_print(ANDROID_LOG_INFO, "TrustUserCertificates", "package=%s %s", package_, message);
+            if (applied == 1) {
+                tuc::HookReport report{tuc::kMagic, hook_flags_, static_cast<uint32_t>(active)};
+                if (!write_pipe(ready_, &report, sizeof(report)))
+                    __android_log_print(ANDROID_LOG_ERROR, "TrustUserCertificates", "package=%s hook report failed errno=%d", package_, errno);
+            }
+        }
+        close(ready_);
+        ready_ = -1;
     }
 private:
+    void preload_hooks() {
+#if defined(__aarch64__)
+        constexpr char library[] = "arm64-v8a.so";
+#elif defined(__arm__)
+        constexpr char library[] = "armeabi-v7a.so";
+#elif defined(__x86_64__)
+        constexpr char library[] = "x86_64.so";
+#elif defined(__i386__)
+        constexpr char library[] = "x86.so";
+#else
+#error Unsupported hook architecture
+#endif
+        int module = api_->getModuleDir();
+        int hooks = module < 0 ? -1 : openat(module, "hooks", O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
+        int engine = hooks < 0 ? -1 : openat(hooks, library, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+        int dex = module < 0 ? -1 : openat(module, "hooks.dex", O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+        struct stat engine_stat{}, dex_stat{};
+        bool valid = engine >= 0 && dex >= 0 && fstat(engine, &engine_stat) == 0 && S_ISREG(engine_stat.st_mode) &&
+            fstat(dex, &dex_stat) == 0 && S_ISREG(dex_stat.st_mode) && dex_stat.st_size > 0 && dex_stat.st_size <= 16 * 1024 * 1024;
+        const char *reason = "missing or invalid hook assets";
+        if (valid) {
+            dex_size_ = static_cast<size_t>(dex_stat.st_size);
+            void *mapping = mmap(nullptr, dex_size_, PROT_READ, MAP_PRIVATE, dex, 0);
+            if (mapping != MAP_FAILED) {
+                android_dlextinfo options{};
+                options.flags = ANDROID_DLEXT_USE_LIBRARY_FD;
+                options.library_fd = engine;
+                void *handle = android_dlopen_ext("libtrustusercerts-hooks.so", RTLD_NOW | RTLD_LOCAL, &options);
+                if (handle) {
+                    auto install = reinterpret_cast<Install>(dlsym(handle, "tuc_hooks_install"));
+                    auto prepare = reinterpret_cast<int (*)(JNIEnv *)>(dlsym(handle, "tuc_hooks_prepare"));
+                    if (!install || !prepare) { reason = "hook engine has no prepare/install entry"; dlclose(handle); }
+                    // LSPlant needs Zygote's JNI access; app trust sources initialize only after specialization.
+                    else if (prepare(env_) == 1) { install_ = install; dex_ = mapping; }
+                    else reason = "hook engine prepare failed";
+                    // A prepare attempt may leave ART callbacks installed even on failure; retain the engine.
+                } else reason = dlerror();
+                // A successful engine keeps this mapping for its InMemoryDexClassLoader.
+                if (!install_) munmap(mapping, dex_size_);
+            } else reason = "hook dex mmap failed";
+        }
+        if (!install_) __android_log_print(ANDROID_LOG_ERROR, "TrustUserCertificates", "package=%s %s", package_, reason ? reason : "hook engine preload failed");
+        if (engine >= 0) close(engine);
+        if (dex >= 0) close(dex);
+        if (hooks >= 0) close(hooks);
+        if (module >= 0) close(module);
+    }
+    using Install = int (*)(JNIEnv *, const void *, size_t, uint8_t);
+    Install install_ = nullptr;
+    void *dex_ = nullptr;
+    size_t dex_size_ = 0;
+    uint8_t hook_flags_ = 0;
+    uint32_t uid_ = 0;
+    char package_[256] = {};
     zygisk::Api *api_ = nullptr;
     JNIEnv *env_ = nullptr;
     int ready_ = -1;

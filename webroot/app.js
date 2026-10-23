@@ -3,6 +3,7 @@
   const $ = id => document.getElementById(id);
   const bridge = window.ksu && typeof window.ksu.exec === 'function';
   const assignments = new Map();
+  const hooks = new Map();
   const globalCertificates = new Map();
   const expanded = new Set();
   let apps = [], certificates = [], busy = false, dirty = false, callbackId = 0, activeTab = 'status', savedPolicy = '';
@@ -131,9 +132,14 @@
 
   const rule = (key, name, mode) => `${key} ${name}${mode === 'system' ? '' : ' ' + mode}`;
   const offHint = 'Disable module CA injection only; original Android CAs remain trusted.';
-  function policyRecords(applicationSets = assignments, globalSet = globalCertificates) {
+  function policyRecords(applicationSets = assignments, globalSet = globalCertificates, hookSets = hooks) {
     const records = [...globalSet].map(([name, mode]) => rule('@global', name, mode));
     for (const [key, names] of applicationSets) for (const [name, mode] of names) records.push(rule(key, name, mode));
+    for (const [key, flags] of hookSets) {
+      const bits = (flags.disableCT ? 1 : 0) | (flags.trustUserCAs ? 2 : 0) | (flags.trustSystemCAs ? 4 : 0);
+      const mode = ['', 'ct', 'user', 'both', 'system', 'ct-system', 'user-system', 'all'][bits];
+      if (mode) records.push(`${key} @hooks ${mode}`);
+    }
     return records.sort().join('\n');
   }
 
@@ -261,17 +267,17 @@
     }
   }
 
-  function renderApps(focusPackage, focusCertificate) {
+  function renderApps(focusPackage, focusCertificate, focusHook) {
     closeChoice();
     const query = $('search').value.trim().toLowerCase();
     const fragment = document.createDocumentFragment();
     const all = new Map(apps.map(app => [appKey(app), app]));
-    for (const key of assignments.keys()) if (!all.has(key)) {
+    for (const key of new Set([...assignments.keys(), ...hooks.keys()])) if (!all.has(key)) {
       const separator = key.indexOf(':');
       const pkg = separator < 0 ? key : key.slice(separator + 1);
       all.set(key, { package: pkg, label: pkg, userId: separator < 0 ? 0 : Number(key.slice(0, separator)) });
     }
-    const count = pkg => assignments.get(pkg)?.size || 0;
+    const count = pkg => (assignments.get(pkg)?.size || 0) + Number(hooks.has(pkg));
     const profile = $('profile-filter').value || 'all';
     const visible = [...all.values()].filter(app => (profile === 'all' || String(app.userId || 0) === profile) &&
       `${app.label || app.package} ${app.package} ${profileName(app)}`.toLowerCase().includes(query))
@@ -313,11 +319,12 @@
       identifier.textContent = app.package;
       const badge = document.createElement('small');
       const effective = effectiveModes(pkg);
-      badge.className = effective.size ? 'app-enabled' : 'app-disabled';
-      badge.textContent = ['system', 'user', 'both'].map(mode => {
+      const flags = hooks.get(pkg);
+      badge.className = effective.size || flags ? 'app-enabled' : 'app-disabled';
+      badge.textContent = [...['system', 'user', 'both'].map(mode => {
         const total = [...effective.values()].filter(value => value === mode).length;
         return total ? `${total} ${mode[0].toUpperCase() + mode.slice(1)}` : '';
-      }).filter(Boolean).join(' · ') || 'Off';
+      }), flags?.disableCT ? 'CT off' : '', flags?.trustUserCAs ? 'User CAs' : '', flags?.trustSystemCAs ? 'System CAs' : ''].filter(Boolean).join(' · ') || 'Off';
       text.append(name, identifier, badge);
       const profileBadge = document.createElement('small');
       profileBadge.className = 'profile-badge';
@@ -365,7 +372,40 @@
         add.addEventListener('click', () => { selectTab('certificates', true); $('add-certificate').focus(); });
         choices.append(empty, add);
       }
-      row.append(summary, choices);
+      const hookChoices = document.createElement('fieldset');
+      hookChoices.className = 'app-hooks';
+      hookChoices.setAttribute('aria-label', `TLS options for ${app.label || app.package}, ${profileName(app)}`);
+      for (const [feature, title, description] of [
+        ['disableCT', 'Disable CT', 'Disable Android Certificate Transparency checks for this app. Its own TLS stack may not be covered.'],
+        ['trustSystemCAs', 'Trust system CAs', 'Trust existing or injected Android system CA anchors. Certificate pinning, expiry and hostname checks remain.'],
+        ['trustUserCAs', 'Trust user CAs', 'Trust existing or injected Android user CA anchors. Certificate pinning, expiry and hostname checks remain.'],
+      ]) {
+        const label = document.createElement('label');
+        label.className = 'hook-choice';
+        const text = document.createElement('span');
+        text.textContent = title;
+        const toggle = document.createElement('input');
+        toggle.type = 'checkbox';
+        toggle.className = 'hook-switch';
+        toggle.dataset.hook = feature;
+        toggle.checked = flags?.[feature] === true;
+        toggle.disabled = busy || !bridge;
+        toggle.setAttribute('role', 'switch');
+        toggle.setAttribute('aria-checked', String(toggle.checked));
+        toggle.setAttribute('aria-label', `${title} for ${app.label || app.package}, ${profileName(app)}`);
+        toggle.setAttribute('aria-description', description);
+        toggle.title = description;
+        toggle.addEventListener('change', () => {
+          const next = { disableCT: false, trustUserCAs: false, trustSystemCAs: false, ...hooks.get(pkg), [feature]: toggle.checked };
+          if (next.disableCT || next.trustUserCAs || next.trustSystemCAs) hooks.set(pkg, next); else hooks.delete(pkg);
+          expanded.add(pkg);
+          renderApps(pkg, undefined, feature);
+        });
+        label.append(text, toggle);
+        hookChoices.append(label);
+        if (pkg === focusPackage && feature === focusHook) focusTarget = toggle;
+      }
+      row.append(summary, choices, hookChoices);
       fragment.append(row);
     }
     if (!visible.length) {
@@ -381,7 +421,7 @@
 
   function selectionChanged() {
     updateSave();
-    $('selected-count').textContent = String(assignments.size);
+    $('selected-count').textContent = String(new Set([...assignments.keys(), ...hooks.keys()]).size);
     $('selection-note').textContent = 'Saving stops configured apps.';
     $('global-count').textContent = String(globalCertificates.size);
     $('global-note').textContent = 'All apps. Restart running apps after changes.';
@@ -421,12 +461,16 @@
     certificates = status.certificates;
     const savedAssignments = new Map(Object.entries(status.assignments).map(([key, modes]) => [key, new Map(Object.entries(modes))]));
     const savedGlobal = new Map(Object.entries(status.globalCertificates));
-    savedPolicy = policyRecords(savedAssignments, savedGlobal);
+    const savedHooks = new Map(Object.entries(status.hooks).filter(([, flags]) => flags.disableCT === true || flags.trustUserCAs === true || flags.trustSystemCAs === true)
+      .map(([key, flags]) => [key, { disableCT: flags.disableCT === true, trustUserCAs: flags.trustUserCAs === true, trustSystemCAs: flags.trustSystemCAs === true }]));
+    savedPolicy = policyRecords(savedAssignments, savedGlobal, savedHooks);
     if (resetAssignments) {
       assignments.clear();
       for (const [pkg, modes] of savedAssignments) if (modes.size) assignments.set(pkg, modes);
       globalCertificates.clear();
       for (const [name, mode] of savedGlobal) globalCertificates.set(name, mode);
+      hooks.clear();
+      for (const [key, flags] of savedHooks) hooks.set(key, flags);
     } else {
       const valid = new Set(certificates.map(cert => cert.name));
       for (const name of globalCertificates.keys()) if (!valid.has(name)) globalCertificates.delete(name);
@@ -437,7 +481,7 @@
     }
     $('status').textContent = status.ready ? 'Ready' : 'Setup required';
     $('status-reason').textContent = status.reason || '';
-    $('overview-apps').textContent = String(Object.keys(status.assignments).length);
+    $('overview-apps').textContent = String(new Set([...savedAssignments.keys(), ...savedHooks.keys()]).size);
     $('overview-certs').textContent = String(certificates.length);
     $('overview-global').textContent = String(savedGlobal.size);
     $('log').textContent = status.log || 'The log is empty.';

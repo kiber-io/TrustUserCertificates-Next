@@ -104,6 +104,15 @@ reaping could recycle that PID; a kernel-stuck worker may finish later.
 User mode only supplies a genuine user trust store; it does not make an app opt
 into trusting that store. Apps targeting API 24+ must normally explicitly trust
 user CAs in their [network security configuration](https://developer.android.com/privacy-and-security/security-config).
+The optional per-app Trust user CAs hook adds this source to the framework
+configuration without changing the APK. Disable CT is a separate per-app hook.
+Both default to off; see [hooks/README.md](hooks/README.md) for their scope.
+Each explicit snapshot may contain a regular `hooks` file with one byte:
+bit 0 disables CT, bit 1 adds user CAs and bit 2 adds system CAs; absent means no hooks. Only these
+selected children prepare the ART engine before specialization and install the
+Java hook after successful mounts. The companion acknowledges mounts first,
+then records the requested and active hook flags from the child's bounded
+completion report. A failed hook does not turn certificate verification off.
 Android reads this store through [UserCertificateSource](https://android.googlesource.com/platform/frameworks/base/+/refs/heads/main/core/java/android/security/net/config/UserCertificateSource.java).
 Both, a stock system root, or an independent global System assignment can still
 make Chromium classify the same subject/public key as a known system root, so
