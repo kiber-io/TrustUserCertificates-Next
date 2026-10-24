@@ -4,6 +4,13 @@
 * Keep existing certificate and pinning validation when adding user CA trust through Android's network security configuration.
 * Load the ART hook engine only in processes with explicitly enabled hooks.
 * Cover compiled XML security configuration parsing so installed hooks change the app's actual trust policy.
+* Redesign WebUI with neutral dark surfaces, compact app cards and subdued dynamic accents.
+* Build app settings on expansion and retain existing rows, icons and switches during local edits.
+* Exit Java CLI helpers explicitly to remove repeated shutdown delays from policy saves and WebUI loading.
+* Lock the WebUI before native operations start and keep it locked through completion or failure.
+* Make the overview available without waiting for the background app inventory.
+* Cache PNG icons with APK, split, overlay and resource-configuration invalidation.
+* Refresh both global system trust stores in one namespace entry per process.
 
 # v2.5.2
 

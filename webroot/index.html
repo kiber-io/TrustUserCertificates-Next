@@ -13,13 +13,14 @@
     <p id="message" class="error-card" role="alert"></p>
     <div id="operation" class="operation" role="status" aria-live="polite" hidden><span class="spinner" aria-hidden="true"></span><span id="operation-text"></span></div>
     <div id="panel-status" class="tab-panel" role="tabpanel" aria-labelledby="tab-status" tabindex="0">
-      <section class="card" aria-label="Module overview">
+      <section class="overview-hero" aria-label="Module overview">
+        <div class="brand"><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3 4 6v6c0 5 8 9 8 9s8-4 8-9V6z"/><path d="m8.5 11.5 2.5 2.5 4.5-5"/></svg></span><div><h1>TUC Next</h1><span class="brand-caption">Selective certificate trust</span></div></div>
         <p id="status" class="overview-status" role="status">Connecting…</p>
-        <div class="overview-stats"><div><strong id="overview-apps">0</strong><span>Apps</span></div><div><strong id="overview-certs">0</strong><span>Certificates</span></div><div><strong id="overview-global">0</strong><span>Global CAs</span></div></div>
+        <div class="overview-stats"><div><strong id="overview-apps">0</strong><span>Configured apps</span></div><div><strong id="overview-certs">0</strong><span>Certificates</span></div><div><strong id="overview-global">0</strong><span>Global CAs</span></div></div>
         <div class="actions"><button id="refresh" class="secondary" type="button" disabled>Refresh</button><button id="apply" class="secondary" type="button" aria-label="Reapply saved policy and stop configured apps" disabled>Reapply</button></div>
       </section>
-      <details id="diagnostics" class="card"><summary>Diagnostics</summary><p id="status-reason" class="hint"></p><pre id="log">No data.</pre></details>
-      <details class="card"><summary>About &amp; license</summary>
+      <details id="diagnostics" class="card"><summary><span>Diagnostics</span><span class="summary-caption">Status &amp; logs</span></summary><p id="status-reason" class="hint"></p><pre id="log">No data.</pre></details>
+      <details class="card"><summary><span>About</span><span class="summary-caption">License &amp; source</span></summary>
         <p>TUC Next is a fork of Trust User Certificates by lupohan44, modified by kiber.io on 2026-10-15.</p>
         <p>Licensed under GNU AGPLv3, without warranty. You may modify and redistribute it under that license.</p>
         <p><a href="license.txt" target="_blank" rel="noopener noreferrer">License</a> · <a href="notice.txt" target="_blank" rel="noopener noreferrer">Notices</a> · <a href="https://github.com/kiber-io/TrustUserCertificates-Next" target="_blank" rel="noopener noreferrer">Source code</a></p>
@@ -27,11 +28,11 @@
     </div>
     <div id="panel-certificates" class="tab-panel" role="tabpanel" aria-labelledby="tab-certificates" tabindex="0" hidden>
       <section class="card" aria-labelledby="certs-title">
-        <div class="section-title"><h2 id="certs-title">Certificates</h2><span id="cert-count" class="count">0</span></div>
+        <div class="section-title"><div class="section-name"><h2 id="certs-title">Certificates</h2><span id="cert-count" class="count">0</span></div><button id="add-certificate" class="import-button" type="button" aria-label="Import a PEM or DER CA certificate, up to 64 KiB" disabled>Import</button></div>
         <ul id="certificates" class="certificates"></ul>
-        <button id="add-certificate" class="secondary" type="button" aria-label="Import a PEM or DER CA certificate, up to 64 KiB" disabled>Add certificate</button><input id="certificate" type="file" accept=".pem,.crt,.cer,.der" aria-label="Certificate file" hidden disabled>
+        <input id="certificate" type="file" accept=".pem,.crt,.cer,.der" aria-label="Certificate file" hidden disabled>
       </section>
-      <section class="card" aria-labelledby="global-title">
+      <section class="card global-card" aria-labelledby="global-title">
         <div class="section-title"><h2 id="global-title">Global trust</h2><span id="global-count" class="count">0</span></div>
         <p id="global-note" class="hint">All apps. Restart running apps after changes.</p>
         <div id="global-certificates"></div>
@@ -39,16 +40,17 @@
       </section>
     </div>
     <div id="panel-apps" class="tab-panel" role="tabpanel" aria-labelledby="tab-apps" tabindex="0" hidden>
-      <section class="card" aria-labelledby="apps-title">
-        <div class="section-title"><h2 id="apps-title">Apps</h2><span id="selected-count" class="count">0</span></div>
-        <label for="search" class="search-label">Search</label><input id="search" type="search" placeholder="App or package" autocomplete="off" disabled>
-        <div id="profile-filter-wrap" hidden><label for="profile-filter" class="search-label">Profile</label><button id="profile-filter" class="profile-filter" type="button" aria-label="Profile" disabled>All profiles</button></div>
+      <section class="app-toolbar" aria-labelledby="apps-title">
+        <div class="section-title"><h2 id="apps-title">Apps</h2><span class="count"><span id="selected-count">0</span> configured</span></div>
+        <label for="search" class="search-label visually-hidden">Search apps</label><input id="search" type="search" placeholder="Search apps or packages" autocomplete="off" disabled>
+        <div id="profile-filter-wrap" hidden><label for="profile-filter" class="search-label visually-hidden">Profile</label><button id="profile-filter" class="profile-filter" type="button" aria-label="Profile" disabled>All profiles</button></div>
         <p id="selection-note" class="hint">Saving stops configured apps.</p>
       </section>
+      <div id="apps-loading" class="apps-loading" role="status" hidden><span class="spinner" aria-hidden="true"></span>Loading apps…</div>
       <section class="card app-list-card" aria-label="App list"><div id="apps" class="apps"></div></section>
     </div>
   </main>
-  <button id="save" class="save-fab" type="button" aria-label="Save policy and stop configured apps" hidden disabled>Save</button>
+  <button id="save" class="save-fab" type="button" aria-label="Save policy and stop configured apps" hidden disabled>Save changes</button>
   <nav class="bottom-nav" role="tablist" aria-label="Sections" aria-orientation="horizontal">
     <button id="tab-status" class="nav-item" type="button" role="tab" aria-controls="panel-status" aria-selected="true" tabindex="0"><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v6m0-10v1"/></svg></span><span>Overview</span></button>
     <button id="tab-certificates" class="nav-item" type="button" role="tab" aria-controls="panel-certificates" aria-selected="false" tabindex="-1"><span class="nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 4 6v6c0 5 8 9 8 9s8-4 8-9V6z"/><path d="m8.5 11.5 2.5 2.5 4.5-5"/></svg></span><span>Certificates</span></button>

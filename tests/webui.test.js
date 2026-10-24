@@ -7,7 +7,7 @@ const fs = require('node:fs');
 class Element {
   constructor(tag = '') { this.tag = tag; this.children = []; this.listeners = {}; this.attributes = {}; this.dataset = {}; this.style = {}; this.className = ''; this.value = ''; this.textContent = ''; this.classList = { toggle() {} }; }
   append(...nodes) { this.children.push(...nodes.flatMap(node => node.tag === 'fragment' ? node.children : [node])); }
-  replaceChildren(...nodes) { this.children = []; this.append(...nodes); }
+  replaceChildren(...nodes) { this.replaceCount = (this.replaceCount || 0) + 1; this.children = []; this.append(...nodes); }
   addEventListener(name, callback) { this.listeners[name] = callback; }
   setAttribute(name, value) { this.attributes[name] = value; }
   getAttribute(name) { return this.attributes[name] ?? null; }
@@ -88,13 +88,14 @@ function setup(bridge = true, dynamicColor = '', fixtureCertificates, fixtureApp
     window, document, Event, Uint8Array, TextDecoder, btoa: text => Buffer.from(text, 'binary').toString('base64'),
     setTimeout: fn => { timers.set(++timerId, fn); return timerId; }, clearTimeout: id => timers.delete(id),
   });
-  return { element, calls, window, timers, hostile, certName, status, apps, frames, documentEvents, windowEvents };
+  return { element, calls, window, timers, hostile, certName, status, apps, frames, documentEvents, windowEvents, created };
 }
 
 const settle = async () => { for (let i = 0; i < 6; i++) await new Promise(resolve => setImmediate(resolve)); };
 const packageOf = row => row.children[0].children[1].children[1].textContent;
 const rowFor = (ui, key) => ui.element('apps').children.find(row => row.dataset.appKey === key);
-const choice = (row, index) => row.children[1].children[index].children[0];
+const openRow = row => { if (!row.open) { row.open = true; row.listeners.toggle(); } return row; };
+const choice = (row, index) => openRow(row).children[1].children[index].children[0];
 const setMode = (ui, pkg, index, mode) => {
   const select = choice(rowFor(ui, pkg), index);
   select.click();
@@ -108,7 +109,7 @@ const setGlobalMode = (ui, index, mode) => {
   assert.ok(option);
   option.click();
 };
-const hookFor = (ui, key, feature) => rowFor(ui, key).children[2].children
+const hookFor = (ui, key, feature) => openRow(rowFor(ui, key)).children[2].children
   .map(label => label.children[1]).find(toggle => toggle.dataset.hook === feature);
 const setHook = (ui, key, feature, checked) => {
   const toggle = hookFor(ui, key, feature);
@@ -207,12 +208,13 @@ test('bottom tabs switch panels and remain usable without a root bridge', () => 
   assert.notEqual(ui.element('tab-apps').disabled, true);
 });
 
-test('uses the official local KernelSU palette with CSS fallbacks for older managers', () => {
+test('uses dark neutral surfaces and only a subtle local KernelSU accent', () => {
   const html = fs.readFileSync('webroot/index.html', 'utf8');
   const css = fs.readFileSync('webroot/style.css', 'utf8');
   assert.match(html, /href="\/internal\/colors\.css"/);
-  assert.match(css, /--accent: var\(--primary, var\(--fallback-primary\)\)/);
-  assert.match(css, /prefers-color-scheme: dark/);
+  assert.match(css, /color-scheme: dark/);
+  assert.match(css, /--bg: #101214/);
+  assert.match(css, /--accent: color-mix\(in srgb, var\(--primary, #c3dacf\) 16%/);
   assert.match(css, /\[hidden\]\s*\{\s*display: none !important/);
 });
 
@@ -236,9 +238,11 @@ test('real labels and safe icons render with fallbacks; search matches names and
   assert.equal(second.children[1].children[0].children.length, 0, 'App label never becomes markup');
   ui.element('search').value = 'яндекс';
   ui.element('search').listeners.input();
+  await settle();
   assert.deepEqual(ui.element('apps').children.map(packageOf), ['com.first.app']);
   ui.element('search').value = 'com.second';
   ui.element('search').listeners.input();
+  await settle();
   assert.deepEqual(ui.element('apps').children.map(packageOf), ['com.second.app']);
 });
 
@@ -289,16 +293,20 @@ test('action buttons show immediate feedback before the native bridge runs and r
     [ui.element('add-certificate'), () => ui.element('certificate').listeners.change(), /Importing/],
   ];
   for (const [button, action, label] of actions) {
+    ui.element('tab-apps').listeners.click();
     const original = button.textContent;
     action();
     assert.equal(ui.element('operation').hidden, true, 'Button actions do not show the top banner');
     assert.match(button.textContent, label);
     assert.equal(button.attributes['aria-busy'], 'true');
     assert.equal(button.disabled, true);
+    assert.equal(ui.element('search').disabled, true, 'Editing locks synchronously before the paint frames');
+    assert.equal(ui.element('panel-apps').inert, true, 'Details and links lock along with form controls');
+    assert.equal(ui.element('tab-status').disabled, true);
     assert.equal(pending.length, 0, 'The bridge waits for the loading state to paint');
     assert.ok(ui.frames.length);
     ui.element('tab-status').listeners.click();
-    assert.equal(ui.element('panel-status').hidden, false);
+    assert.equal(ui.element('panel-status').hidden, true, 'Sections cannot change while busy');
     await settle();
     assert.equal(ui.element('panel-apps').attributes['aria-busy'], 'true');
     const call = pending.pop();
@@ -308,6 +316,9 @@ test('action buttons show immediate feedback before the native bridge runs and r
     assert.equal(button.textContent, original);
     assert.equal(button.attributes['aria-busy'], undefined);
     assert.equal(ui.element('panel-apps').attributes['aria-busy'], 'false');
+    assert.equal(ui.element('panel-apps').inert, false);
+    assert.equal(ui.element('tab-status').disabled, false);
+    assert.equal(ui.element('search').disabled, false);
     assert.equal(ui.element('message').textContent, 'Test backend error');
     assert.equal(ui.element('save').disabled, false);
     assert.equal(ui.timers.size, 0);
@@ -424,6 +435,8 @@ test('same package in personal and work profiles has independent assignments, ex
   assert.equal(work.children[0].children[1].children[3].textContent, 'Work · Office');
   setMode(ui, '10:com.first.app', 2, 'system');
   assert.equal(choice(rowFor(ui, 'com.first.app'), 2).value, 'inherit');
+  personal.open = false;
+  personal.listeners.toggle();
   assert.equal(choice(rowFor(ui, '10:com.first.app'), 2).value, 'system');
   assert.equal(rowFor(ui, '10:com.first.app').open, true);
   assert.notEqual(rowFor(ui, 'com.first.app').open, true);
@@ -434,10 +447,12 @@ test('same package in personal and work profiles has independent assignments, ex
   ui.element('profile-filter').value = 'all';
   ui.element('search').value = 'office';
   ui.element('search').listeners.input();
+  await settle();
   assert.equal(ui.element('apps').children.length, 1);
   assert.equal(ui.element('apps').children[0].dataset.appKey, '10:com.first.app');
   ui.element('search').value = '';
   ui.element('search').listeners.input();
+  await settle();
   ui.element('tab-apps').listeners.click();
   ui.element('save').listeners.click();
   assert.equal(ui.element('save').attributes['aria-busy'], 'true');
@@ -832,4 +847,167 @@ test('hostile hook keys remain inert text and strict boolean flags do not enable
   assert.equal(hookFor(ui, hostileKey, 'trustUserCAs').checked, true);
   assert.equal({}.disableCT, undefined);
   assert.equal(rowFor(ui, 'com.disabled.app'), undefined);
+});
+
+
+test('large app lists build settings only on expansion and preserve unrelated controls during edits', async () => {
+  const manyApps = Array.from({ length: 400 }, (_, i) => ({ package: `com.test.app${i}`, label: `App ${i}`, userId: 0 }));
+  const manyCerts = Array.from({ length: 16 }, (_, i) => ({ name: `${i.toString(16).padStart(8, '0')}.0`, subject: `CN=CA ${i}`, fingerprint: `AA:${i}` }));
+  const ui = setup(true, '', manyCerts, manyApps, { assignments: {}, hooks: {} });
+  await settle();
+  assert.equal(ui.element('apps').children.length, 400);
+  for (const row of ui.element('apps').children) {
+    assert.equal(row.children[1].children.length, 0, 'Collapsed CA controls must not be built');
+    assert.equal(row.children[2].children.length, 0, 'Collapsed hook controls must not be built');
+  }
+  const first = rowFor(ui, 'com.test.app0');
+  const other = rowFor(ui, 'com.test.app1');
+  const otherSelect = choice(other, 0);
+  const icon = first.children[0].children[0];
+  setHook(ui, 'com.test.app0', 'disableCT', true);
+  const replacements = ui.element('apps').replaceCount;
+  const created = ui.created.length;
+  setHook(ui, 'com.test.app0', 'trustUserCAs', true);
+  assert.equal(rowFor(ui, 'com.test.app0'), first, 'Editing retains the app row');
+  assert.equal(first.children[0].children[0], icon, 'Icons are not recreated');
+  assert.equal(choice(rowFor(ui, 'com.test.app1'), 0), otherSelect, 'Unrelated open settings remain mounted');
+  assert.equal(ui.element('apps').replaceCount, replacements, 'Unchanged ordering does not detach the list');
+  assert.equal(ui.created.length, created, 'Hook edits reuse existing switches and CA controls');
+  assert.equal(ui.calls.length, 2, 'Local editing does not invoke root commands');
+});
+
+test('search coalesces rapid input and reuses rows when clearing the query', async () => {
+  const ui = setup();
+  await settle();
+  const original = rowFor(ui, 'com.first.app');
+  const created = ui.created.length;
+  for (const query of ['c', 'com', 'com.first']) {
+    ui.element('search').value = query;
+    ui.element('search').listeners.input();
+  }
+  assert.equal(ui.frames.length, 1, 'Only one render is queued per frame');
+  await settle();
+  assert.deepEqual(ui.element('apps').children.map(packageOf), ['com.first.app']);
+  ui.element('search').value = '';
+  ui.element('search').listeners.input();
+  await settle();
+  assert.equal(rowFor(ui, 'com.first.app'), original);
+  assert.equal(ui.created.length, created, 'Filtering does not recreate cached rows');
+});
+
+test('save keeps the whole interface locked through both the save and status callbacks', async () => {
+  const ui = setup();
+  await settle();
+  ui.element('tab-apps').listeners.click();
+  setMode(ui, 'com.second.app', 0, 'system');
+  const pending = [];
+  ui.window.ksu.exec = (command, options, callback) => pending.push({ command, callback });
+  const locked = () => {
+    assert.equal(ui.element('search').disabled, true);
+    assert.equal(ui.element('save').disabled, true);
+    for (const tab of ['status', 'certificates', 'apps']) {
+      assert.equal(ui.element('tab-' + tab).disabled, true);
+      assert.equal(ui.element('panel-' + tab).inert, true);
+      assert.equal(ui.element('panel-' + tab).attributes['aria-busy'], 'true');
+    }
+  };
+  ui.element('save').listeners.click();
+  locked();
+  assert.equal(pending.length, 0, 'The locked state is set before yielding to paint');
+  await settle();
+  locked();
+  const save = pending.shift();
+  assert.match(save.command, /'save-policy'/);
+  ui.element('save').listeners.click();
+  await settle();
+  assert.equal(pending.length, 0, 'Repeated saves cannot start another operation');
+  ui.status.assignments['com.second.app'] = { '11111111.0': 'system' };
+  ui.window[save.callback](0, '', '');
+  await settle();
+  locked();
+  const status = pending.shift();
+  assert.match(status.command, /'status'$/);
+  ui.window[status.callback](0, JSON.stringify(ui.status), '');
+  await settle();
+  assert.equal(ui.element('search').disabled, false);
+  assert.equal(ui.element('save').hidden, true);
+  for (const tab of ['status', 'certificates', 'apps']) {
+    assert.equal(ui.element('tab-' + tab).disabled, false);
+    assert.equal(ui.element('panel-' + tab).inert, false);
+    assert.equal(ui.element('panel-' + tab).attributes['aria-busy'], 'false');
+  }
+  assert.equal(ui.timers.size, 0);
+});
+
+test('overview becomes interactive before app metadata and background completion preserves edits', async () => {
+  const ui = setup();
+  const native = ui.window.ksu.exec;
+  let appsCallback;
+  ui.window.ksu.exec = (command, options, callback) => {
+    if (command.endsWith("'apps'")) appsCallback = callback;
+    else native(command, options, callback);
+  };
+  await settle();
+  assert.equal(ui.element('status').textContent, 'Ready');
+  assert.equal(ui.element('refresh').disabled, false);
+  assert.equal(ui.element('tab-apps').disabled, false);
+  assert.equal(ui.element('operation').hidden, true);
+  assert.equal(ui.element('search').disabled, true);
+  assert.equal(ui.element('apps-loading').hidden, false);
+  assert.equal(ui.element('apps').children.length, 0, 'Do not show a partial list as the complete inventory');
+  ui.element('tab-certificates').listeners.click();
+  setGlobalMode(ui, 2, 'user');
+  assert.equal(ui.element('save').hidden, false);
+  ui.window[appsCallback](0, JSON.stringify(ui.apps), '');
+  await settle();
+  assert.equal(ui.element('search').disabled, false);
+  assert.equal(ui.element('apps-loading').hidden, true);
+  assert.equal(ui.element('apps').children.length, 2);
+  assert.equal(ui.element('save').hidden, false, 'Inventory completion must preserve pending policy edits');
+  assert.match(rowFor(ui, 'com.second.app').children[0].children[1].children[2].textContent, /1 User/);
+});
+
+test('background inventory cannot unlock an in-progress save', async () => {
+  const ui = setup();
+  const native = ui.window.ksu.exec;
+  let appsCallback, saveCallback;
+  ui.window.ksu.exec = (command, options, callback) => {
+    if (command.endsWith("'apps'")) appsCallback = callback;
+    else if (command.includes("'save-policy'")) saveCallback = callback;
+    else native(command, options, callback);
+  };
+  await settle();
+  ui.element('tab-certificates').listeners.click();
+  setGlobalMode(ui, 2, 'user');
+  ui.element('save').listeners.click();
+  await settle();
+  ui.window[appsCallback](0, JSON.stringify(ui.apps), '');
+  await settle();
+  assert.equal(ui.element('save').disabled, true);
+  assert.equal(ui.element('search').disabled, true);
+  assert.equal(ui.element('panel-certificates').inert, true);
+  assert.equal(ui.element('tab-apps').disabled, true);
+  ui.window[saveCallback](1, '', 'Save failed');
+  await settle();
+  assert.equal(ui.element('search').disabled, false);
+  assert.equal(ui.element('panel-certificates').inert, false);
+  assert.equal(ui.element('tab-apps').disabled, false);
+  assert.equal(ui.element('message').textContent, 'Save failed');
+});
+
+test('inventory failure leaves loaded status and certificate controls usable', async () => {
+  const ui = setup();
+  const native = ui.window.ksu.exec;
+  ui.window.ksu.exec = (command, options, callback) => {
+    if (command.endsWith("'apps'")) ui.window[callback](1, '', 'Cannot enumerate apps');
+    else native(command, options, callback);
+  };
+  await settle();
+  assert.equal(ui.element('status').textContent, 'Ready');
+  assert.equal(ui.element('message').textContent, 'Cannot enumerate apps');
+  assert.equal(ui.element('refresh').disabled, false);
+  assert.equal(ui.element('add-certificate').disabled, false);
+  assert.equal(ui.element('tab-apps').disabled, false);
+  assert.equal(ui.element('apps-loading').hidden, true);
+  assert.equal(ui.timers.size, 0);
 });

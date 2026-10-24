@@ -66,4 +66,14 @@ touch "$ROOT/on/system/.trustusercerts-app"
 mount --bind "$ROOT/on/system" "$SYSTEM_CERTS"
 global_namespace "$$" "$ROOT/changed"
 [ -f "$SYSTEM_CERTS/bbbbbbbb.0" ]
-echo 'PASS: private global mounts, replacement, removal, read-only and per-app protection'
+[ -f "$APEX_CERTS/cccccccc.0" ]
+# Protecting one store must not skip the other in the shared nsenter call.
+umount -l "$SYSTEM_CERTS"
+mount --bind "$ROOT/on/apex" "$APEX_CERTS"
+touch "$ROOT/on/apex/.trustusercerts-app"
+global_namespace "$$" "$ROOT/changed"
+[ -f "$SYSTEM_CERTS/cccccccc.0" ]
+[ -f "$APEX_CERTS/bbbbbbbb.0" ]
+# A failed namespace entry must propagate to the caller for rollback.
+if global_namespace 2147483647 "$ROOT/changed" 2>/dev/null; then exit 1; fi
+echo 'PASS: private global mounts, replacement, removal, read-only, independent per-app protection and entry failure'

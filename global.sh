@@ -5,23 +5,24 @@ global_namespace() {
     global_source=$2
     global_enabled=false
     [ ! -f "$global_source/system-enabled" ] || global_enabled=true
-    for global_store in system apex; do
-        case "$global_store" in system) global_target=$SYSTEM_CERTS ;; apex) global_target=$APEX_CERTS ;; esac
-        [ -d "$global_source/$global_store" ] || continue
-        "$BUSYBOX" nsenter --mount="/proc/$global_pid/ns/mnt" -- "/proc/$$/root$BUSYBOX" sh -c '
-            set -e
+    # Enter once per process; both trust stores belong to the same namespace.
+    "$BUSYBOX" nsenter --mount="/proc/$global_pid/ns/mnt" -- "/proc/$$/root$BUSYBOX" sh -c '
+        set -e
+        for store in system apex; do
+            case "$store" in system) target=$2 ;; apex) target=$3 ;; esac
+            [ -d "$1/$store" ] || continue
             # Individual stores are refreshed by restarting their configured apps.
-            [ ! -f "$2/.trustusercerts-app" ] || exit 0
-            if [ -f "$2/.trustusercerts-global" ]; then umount -l "$2"; fi
-            if [ "$3" = true ]; then
-                mount --bind "$1" "$2"
-                if ! mount -o remount,bind,ro "$2" "$2"; then
-                    umount -l "$2"
+            [ ! -f "$target/.trustusercerts-app" ] || continue
+            if [ -f "$target/.trustusercerts-global" ]; then umount -l "$target"; fi
+            if [ "$4" = true ]; then
+                mount --bind "$1/$store" "$target"
+                if ! mount -o remount,bind,ro "$target" "$target"; then
+                    umount -l "$target"
                     exit 1
                 fi
             fi
-        ' sh "$global_source/$global_store" "$global_target" "$global_enabled" || return 1
-    done
+        done
+    ' sh "$global_source" "$SYSTEM_CERTS" "$APEX_CERTS" "$global_enabled" || return 1
 }
 
 apply_global() {

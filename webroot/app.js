@@ -6,6 +6,8 @@
   const hooks = new Map();
   const globalCertificates = new Map();
   const expanded = new Set();
+  const appRows = new Map();
+  let appOrder = null, searchPending = false, appsLoading = Boolean(bridge);
   let apps = [], certificates = [], busy = false, dirty = false, callbackId = 0, activeTab = 'status', savedPolicy = '';
   const quote = value => "'" + String(value).replace(/'/g, "'\\''") + "'";
   const tabs = ['status', 'certificates', 'apps'];
@@ -189,6 +191,7 @@
   }
 
   function selectTab(name, focus = false) {
+    if (busy) return;
     closeChoice();
     activeTab = name;
     tabs.forEach(tab => {
@@ -236,7 +239,13 @@
 
   function controls() {
     document.querySelectorAll('button:not([role="tab"]), input').forEach(el => { el.disabled = busy || !bridge; });
-    tabs.forEach(tab => $('panel-' + tab).setAttribute('aria-busy', String(busy)));
+    tabs.forEach(tab => {
+      $('panel-' + tab).setAttribute('aria-busy', String(busy || (tab === 'apps' && appsLoading)));
+      $('panel-' + tab).inert = busy;
+      $('tab-' + tab).disabled = busy;
+    });
+    $('search').disabled = $('profile-filter').disabled = busy || !bridge || appsLoading;
+    $('apps-loading').hidden = !appsLoading;
   }
 
   async function run(action, label, button) {
@@ -253,9 +262,9 @@
       button.setAttribute('aria-busy', 'true');
     }
     try {
+      controls();
       // Let WebView paint feedback before the native bridge can block its UI thread.
       await new Promise(resolve => window.requestAnimationFrame(() => window.requestAnimationFrame(resolve)));
-      controls();
       await action();
     }
     catch (error) { $('message').textContent = error.message; }
@@ -267,73 +276,83 @@
     }
   }
 
-  function renderApps(focusPackage, focusCertificate, focusHook) {
-    closeChoice();
-    const query = $('search').value.trim().toLowerCase();
-    const fragment = document.createDocumentFragment();
-    const all = new Map(apps.map(app => [appKey(app), app]));
-    for (const key of new Set([...assignments.keys(), ...hooks.keys()])) if (!all.has(key)) {
-      const separator = key.indexOf(':');
-      const pkg = separator < 0 ? key : key.slice(separator + 1);
-      all.set(key, { package: pkg, label: pkg, userId: separator < 0 ? 0 : Number(key.slice(0, separator)) });
+  function createAppRow(app) {
+    const pkg = appKey(app);
+    const row = document.createElement('details');
+    row.className = 'app';
+    row.dataset.appKey = pkg;
+    row.open = expanded.has(pkg);
+    const summary = document.createElement('summary');
+    summary.className = 'app-summary';
+    const icon = document.createElement('span');
+    icon.className = 'app-icon';
+    const fallback = document.createElement('span');
+    fallback.textContent = (app.label || pkg).slice(0, 1).toLocaleUpperCase('en');
+    fallback.setAttribute('aria-hidden', 'true');
+    icon.append(fallback);
+    if (typeof app.icon === 'string' && app.icon === `app-icons/${app.uid}-${app.package}.png` &&
+        /^app-icons\/[0-9]+-[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+\.png$/.test(app.icon)) {
+      const image = document.createElement('img');
+      image.alt = '';
+      image.loading = 'lazy';
+      image.src = app.icon;
+      image.addEventListener('load', () => { fallback.hidden = true; });
+      image.addEventListener('error', () => { image.hidden = true; fallback.hidden = false; });
+      icon.append(image);
     }
-    const count = pkg => (assignments.get(pkg)?.size || 0) + Number(hooks.has(pkg));
-    const profile = $('profile-filter').value || 'all';
-    const visible = [...all.values()].filter(app => (profile === 'all' || String(app.userId || 0) === profile) &&
-      `${app.label || app.package} ${app.package} ${profileName(app)}`.toLowerCase().includes(query))
-      .sort((a, b) => Number(count(appKey(b)) > 0) - Number(count(appKey(a)) > 0) ||
-        (a.label || a.package).localeCompare(b.label || b.package, 'en') || a.package.localeCompare(b.package) || (a.userId || 0) - (b.userId || 0));
-    let focusTarget;
-    for (const app of visible) {
-      const pkg = appKey(app);
-      const row = document.createElement('details');
-      row.className = 'app';
-      row.dataset.appKey = pkg;
-      row.open = expanded.has(pkg);
-      row.addEventListener('toggle', () => {
-        if (row.open) expanded.add(pkg); else expanded.delete(pkg);
-      });
-      const summary = document.createElement('summary');
-      summary.className = 'app-summary';
-      const icon = document.createElement('span');
-      icon.className = 'app-icon';
-      const fallback = document.createElement('span');
-      fallback.textContent = (app.label || pkg).slice(0, 1).toLocaleUpperCase('en');
-      fallback.setAttribute('aria-hidden', 'true');
-      icon.append(fallback);
-      if (typeof app.icon === 'string' && app.icon === `app-icons/${app.uid}-${app.package}.png` &&
-          /^app-icons\/[0-9]+-[A-Za-z0-9_]+(?:\.[A-Za-z0-9_]+)+\.png$/.test(app.icon)) {
-        const image = document.createElement('img');
-        image.alt = '';
-        image.loading = 'lazy';
-        image.src = app.icon;
-        image.addEventListener('load', () => { fallback.hidden = true; });
-        image.addEventListener('error', () => { image.hidden = true; fallback.hidden = false; });
-        icon.append(image);
-      }
-      const text = document.createElement('span');
-      text.className = 'app-name';
-      const name = document.createElement('strong');
-      name.textContent = app.label || pkg;
-      const identifier = document.createElement('small');
-      identifier.textContent = app.package;
-      const badge = document.createElement('small');
-      const effective = effectiveModes(pkg);
-      const flags = hooks.get(pkg);
-      badge.className = effective.size || flags ? 'app-enabled' : 'app-disabled';
-      badge.textContent = [...['system', 'user', 'both'].map(mode => {
-        const total = [...effective.values()].filter(value => value === mode).length;
-        return total ? `${total} ${mode[0].toUpperCase() + mode.slice(1)}` : '';
-      }), flags?.disableCT ? 'CT off' : '', flags?.trustUserCAs ? 'User CAs' : '', flags?.trustSystemCAs ? 'System CAs' : ''].filter(Boolean).join(' · ') || 'Off';
-      text.append(name, identifier, badge);
-      const profileBadge = document.createElement('small');
-      profileBadge.className = 'profile-badge';
-      profileBadge.textContent = profileName(app);
-      text.append(profileBadge);
-      summary.append(icon, text);
-      const choices = document.createElement('fieldset');
-      choices.className = 'app-certificates';
-      choices.setAttribute('aria-label', `Certificates for ${app.label || app.package}`);
+    const text = document.createElement('span');
+    text.className = 'app-name';
+    const name = document.createElement('strong');
+    name.textContent = app.label || pkg;
+    const identifier = document.createElement('small');
+    identifier.textContent = app.package;
+    identifier.title = app.package;
+    const badge = document.createElement('small');
+    text.append(name, identifier, badge);
+    const profileBadge = document.createElement('small');
+    profileBadge.className = 'profile-badge';
+    profileBadge.textContent = profileName(app);
+    profileBadge.hidden = !app.userId;
+    text.append(profileBadge);
+    summary.append(icon, text);
+    const choices = document.createElement('fieldset');
+    choices.className = 'app-certificates';
+    choices.setAttribute('aria-label', `Certificates for ${app.label || app.package}`);
+    const hookChoices = document.createElement('fieldset');
+    hookChoices.className = 'app-hooks';
+    hookChoices.setAttribute('aria-label', `TLS options for ${app.label || app.package}, ${profileName(app)}`);
+    row.append(summary, choices, hookChoices);
+    const entry = { app, pkg, row, badge, choices, hookChoices, signature: null, certControls: new Map(), hookControls: new Map() };
+    row.addEventListener('toggle', () => {
+      if (row.open) { expanded.add(pkg); populateApp(entry); }
+      else expanded.delete(pkg);
+    });
+    appRows.set(pkg, entry);
+    return entry;
+  }
+
+  function updateAppRow(entry) {
+    const { pkg, badge } = entry;
+    const effective = effectiveModes(pkg);
+    const flags = hooks.get(pkg);
+    const className = effective.size || flags ? 'app-enabled' : 'app-disabled';
+    if (badge.className !== className) badge.className = className;
+    const text = [...['system', 'user', 'both'].map(mode => {
+      const total = [...effective.values()].filter(value => value === mode).length;
+      return total ? `${total} ${mode[0].toUpperCase() + mode.slice(1)}` : '';
+    }), flags?.disableCT ? 'CT off' : '', flags?.trustUserCAs ? 'User CAs' : '', flags?.trustSystemCAs ? 'System CAs' : ''].filter(Boolean).join(' · ') || 'Off';
+    if (badge.textContent !== text) badge.textContent = text;
+  }
+
+  function populateApp(entry) {
+    const { app, pkg, choices, hookChoices } = entry;
+    const effective = effectiveModes(pkg);
+    const flags = hooks.get(pkg);
+    const signature = JSON.stringify([[...effective], [...(assignments.get(pkg) || [])], [...globalCertificates]]);
+    if (entry.signature !== signature) {
+      entry.signature = signature;
+      choices.replaceChildren();
+      entry.certControls.clear();
       for (const cert of certificates) {
         const label = document.createElement('label');
         label.className = 'certificate-choice';
@@ -358,7 +377,7 @@
         }
         label.append(select, description);
         choices.append(label);
-        if (pkg === focusPackage && cert.name === focusCertificate) focusTarget = select;
+        entry.certControls.set(cert.name, select);
       }
       if (!certificates.length) {
         const empty = document.createElement('p');
@@ -372,9 +391,8 @@
         add.addEventListener('click', () => { selectTab('certificates', true); $('add-certificate').focus(); });
         choices.append(empty, add);
       }
-      const hookChoices = document.createElement('fieldset');
-      hookChoices.className = 'app-hooks';
-      hookChoices.setAttribute('aria-label', `TLS options for ${app.label || app.package}, ${profileName(app)}`);
+    }
+    if (!entry.hookControls.size) {
       for (const [feature, title, description] of [
         ['disableCT', 'Disable CT', 'Disable Android Certificate Transparency checks for this app. Its own TLS stack may not be covered.'],
         ['trustSystemCAs', 'Trust system CAs', 'Trust existing or injected Android system CA anchors. Certificate pinning, expiry and hostname checks remain.'],
@@ -403,20 +421,54 @@
         });
         label.append(text, toggle);
         hookChoices.append(label);
-        if (pkg === focusPackage && feature === focusHook) focusTarget = toggle;
+        entry.hookControls.set(feature, toggle);
       }
-      row.append(summary, choices, hookChoices);
-      fragment.append(row);
     }
-    if (!visible.length) {
-      const empty = document.createElement('p');
-      empty.className = 'hint';
-      empty.textContent = 'No apps found.';
-      fragment.append(empty);
+    for (const [feature, toggle] of entry.hookControls) {
+      toggle.checked = flags?.[feature] === true;
+      toggle.setAttribute('aria-checked', String(toggle.checked));
+      toggle.disabled = busy || !bridge;
     }
-    $('apps').replaceChildren(fragment);
+  }
+
+  function renderApps(focusPackage, focusCertificate, focusHook) {
+    if (appsLoading) { selectionChanged(); return; }
+    closeChoice();
+    const query = $('search').value.trim().toLowerCase();
+    const all = new Map(apps.map(app => [appKey(app), app]));
+    for (const key of new Set([...assignments.keys(), ...hooks.keys()])) if (!all.has(key)) {
+      const separator = key.indexOf(':');
+      const pkg = separator < 0 ? key : key.slice(separator + 1);
+      all.set(key, { package: pkg, label: pkg, userId: separator < 0 ? 0 : Number(key.slice(0, separator)) });
+    }
+    const configured = pkg => assignments.has(pkg) || hooks.has(pkg);
+    const profile = $('profile-filter').value || 'all';
+    const visible = [...all.values()].filter(app => (profile === 'all' || String(app.userId || 0) === profile) &&
+      `${app.label || app.package} ${app.package} ${profileName(app)}`.toLowerCase().includes(query))
+      .sort((a, b) => Number(configured(appKey(b))) - Number(configured(appKey(a))) ||
+        (a.label || a.package).localeCompare(b.label || b.package, 'en') || a.package.localeCompare(b.package) || (a.userId || 0) - (b.userId || 0));
+    const nextOrder = visible.map(appKey).join('\n');
+    const fragment = nextOrder !== appOrder ? document.createDocumentFragment() : null;
+    for (const app of visible) {
+      const entry = appRows.get(appKey(app)) || createAppRow(app);
+      updateAppRow(entry);
+      if (entry.row.open) populateApp(entry);
+      if (fragment) fragment.append(entry.row);
+    }
+    if (fragment) {
+      if (!visible.length) {
+        const empty = document.createElement('p');
+        empty.className = 'empty-state';
+        empty.textContent = 'No apps found.';
+        fragment.append(empty);
+      }
+      $('apps').replaceChildren(fragment);
+      appOrder = nextOrder;
+    }
     selectionChanged();
-    if (focusTarget) focusTarget.focus();
+    const entry = appRows.get(focusPackage);
+    const target = focusHook ? entry?.hookControls.get(focusHook) : entry?.certControls.get(focusCertificate);
+    if (target) target.focus({ preventScroll: true });
   }
 
   function selectionChanged() {
@@ -459,6 +511,8 @@
 
   function renderStatus(status, resetAssignments = false) {
     certificates = status.certificates;
+    appRows.clear();
+    appOrder = null;
     const savedAssignments = new Map(Object.entries(status.assignments).map(([key, modes]) => [key, new Map(Object.entries(modes))]));
     const savedGlobal = new Map(Object.entries(status.globalCertificates));
     const savedHooks = new Map(Object.entries(status.hooks).filter(([, flags]) => flags.disableCT === true || flags.trustUserCAs === true || flags.trustSystemCAs === true)
@@ -480,6 +534,7 @@
       }
     }
     $('status').textContent = status.ready ? 'Ready' : 'Setup required';
+    $('status').dataset.ready = String(status.ready);
     $('status-reason').textContent = status.reason || '';
     $('overview-apps').textContent = String(new Set([...savedAssignments.keys(), ...savedHooks.keys()]).size);
     $('overview-certs').textContent = String(certificates.length);
@@ -528,7 +583,11 @@
   $('refresh').addEventListener('click', () => run(async () => {
     renderStatus(JSON.parse(await exec('status')));
   }, 'Refreshing…', $('refresh')));
-  $('search').addEventListener('input', () => renderApps());
+  $('search').addEventListener('input', () => {
+    if (searchPending) return;
+    searchPending = true;
+    window.requestAnimationFrame(() => { searchPending = false; renderApps(); });
+  });
   const savePolicy = button => run(async () => {
     await exec('save-policy', policyRecords());
     renderStatus(JSON.parse(await exec('status')), true);
@@ -556,16 +615,26 @@
     $('status').textContent = 'Open this page using the module WebUI button in KernelSU.';
     controls();
   } else run(async () => {
-    const status = JSON.parse(await exec('status'));
-    renderStatus(status, true);
-    apps = JSON.parse(await exec('apps'));
-    const profiles = new Map(apps.map(app => [app.userId || 0, profileName(app)]));
-    $('profile-filter-wrap').hidden = profiles.size < 2;
-    const options = [{ value: 'all', label: 'All profiles' }];
-    for (const [id, label] of [...profiles].sort(([a], [b]) => a - b)) {
-      options.push({ value: String(id), label });
-    }
-    configureChoice($('profile-filter'), options, 'all', () => renderApps());
-    renderApps();
-  }, 'Loading apps and certificates…');
+    const statusRequest = exec('status');
+    const appsRequest = exec('apps');
+    // The overview waits only for status; app metadata continues in the background.
+    Promise.all([statusRequest, appsRequest]).then(([, appData]) => {
+      apps = JSON.parse(appData);
+      appsLoading = false;
+      appRows.clear();
+      appOrder = null;
+      const profiles = new Map(apps.map(app => [app.userId || 0, profileName(app)]));
+      $('profile-filter-wrap').hidden = profiles.size < 2;
+      const options = [{ value: 'all', label: 'All profiles' }];
+      for (const [id, label] of [...profiles].sort(([a], [b]) => a - b)) {
+        options.push({ value: String(id), label });
+      }
+      configureChoice($('profile-filter'), options, 'all', () => renderApps());
+      renderApps();
+    }).catch(error => { $('message').textContent = error.message; }).finally(() => {
+      appsLoading = false;
+      controls();
+    });
+    renderStatus(JSON.parse(await statusRequest), true);
+  }, 'Loading certificates…');
 })();

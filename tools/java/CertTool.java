@@ -129,6 +129,8 @@ public final class CertTool {
                     "normalize RULES CUSTOM APPMAP | prepare STOCK APEX_OR_DASH RULES CUSTOM APPMAP USER_BASE_ROOT DEST | " +
                     "drop-cert RULES NAME | status READY REASON RULES CUSTOM LOG");
             }
+            // Returning from app_process main adds an avoidable VM shutdown delay.
+            System.exit(0);
         } catch (Exception e) {
             System.err.println("CertTool: " + e.getMessage());
             System.exit(1);

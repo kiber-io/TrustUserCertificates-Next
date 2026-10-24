@@ -45,7 +45,12 @@ The Material 3 interface has three tabs:
 
 Individually configured apps sort first, including apps with explicit Off rules.
 A floating Save button appears only while policy edits are pending. The interface
-uses KernelSU's dynamic palette when available, with light/dark fallbacks.
+uses dark neutral surfaces and a subdued accent tinted by KernelSU's dynamic
+palette when available. App settings are built on expansion; edits and searches
+reuse existing rows and icons instead of rebuilding the full list.
+The overview and certificate controls become available as soon as status is read;
+the app inventory loads separately in the background. PNG icons are reused until
+their APK, split resources, overlays or Android resource configuration changes.
 
 ## Optional app hooks
 
@@ -260,6 +265,10 @@ c++ -std=c++17 native/protocol_test.cpp -o /tmp/tuc-protocol-test
 /tmp/tuc-protocol-test
 bash -c 'exec -a zygote64 /tmp/tuc-protocol-test --zygote-name-check'
 ```
+
+With the new module installed on a rooted Android test device, run
+`bash .github/tests/test-app-cache.sh DEVICE_SERIAL` to check icon-cache invalidation
+and atomic metadata replacement (requires the same JDK and SDK build-tools).
 
 The certificate check covers strict parsing, CA constraints, legacy subject hashes,
 duplicates, collisions and JSON output. WebUI checks use a mocked KernelSU bridge.
